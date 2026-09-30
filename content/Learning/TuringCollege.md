@@ -17,7 +17,7 @@ tags:
   - langgraph
 ---
 
-# AI Engineering: Consolidated Learning Notes
+# AI Engineering
 
 Consolidated on 2026-09-30 from all three files in this directory: `AIEnginerring.org`, the earlier `TuringCollege.md`, and `Learning.md`. Overlapping explanations appear once; distinct examples, recorded results, deployment configurations, and corrections are retained. This file replaces the other two notes.
 

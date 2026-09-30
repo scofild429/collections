@@ -5,23 +5,44 @@ org_id: "705DF36B-D6E2-4662-8EA2-F0AAE6ABB5BC"
 
 # Python
 
-## Collections
+## Iterators
 
-### The Two-Argument iter(callable, sentinel) in Python
+### Two-argument `iter(callable, sentinel)`
 
-The built-in iter() function, typically used to convert iterables (like lists) into iterators, features a powerful secondary mode when provided with exactly two arguments. It transforms a repetitive while loop into an elegant, iterable for loop.
+`iter(iterable)` obtains an iterator from an iterable. The two-argument form instead repeatedly calls a callable **with no arguments** until its result compares equal to a stop value, the **sentinel**.
 
-``` python
-iterator = iter(callable, sentinel) 
+Each request for the next item makes one call. A result equal to the sentinel ends iteration and is **not yielded**. The comparison uses equality (`==`), not identity (`is`); for example, `0.0` compares equal to `0`.
+
+### Example: read fixed-size blocks
+
+```python
+from io import BytesIO
+
+stream = BytesIO(b"abcdefg")
+blocks = list(iter(lambda: stream.read(3), b""))
+assert blocks == [b"abc", b"def", b"g"]
 ```
 
-⚙️ How it Works
+The final `read(3)` returns `b""`, ending iteration. An equivalent loop is:
 
-1.  The callable : A function (often a lambda ) that takes no arguments. It is executed repeatedly each time the iterator
+```python
+from io import BytesIO
 
-advances.
+stream = BytesIO(b"abcdefg")
+blocks = []
+while True:
+    block = stream.read(3)
+    if block == b"":
+        break
+    blocks.append(block)
+assert blocks == [b"abc", b"def", b"g"]
+```
 
-1.  The sentinel : A designated "stop value."
-2.  Execution Flow: When iterated over, Python continuously executes the callable . It yields the return value to the loop until
+### Details to remember
 
-the function returns a value that exactly matches the sentinel . Once the sentinel is returned, a StopIteration exception is internally raised, and the loop terminates cleanly.
+- Iteration is lazy: creating the iterator does not call the callable.
+- Choose a sentinel that cannot be a valid item you want to retain.
+- Iterator exhaustion raises `StopIteration`; a `for` loop handles it automatically.
+- `StopIteration` from the callable also ends iteration. Other exceptions propagate.
+
+Reference: [Python built-in `iter`](https://docs.python.org/3/library/functions.html#iter).

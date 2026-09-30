@@ -4,7 +4,23 @@ org_id: "E679EB60-C52C-4489-8164-5892DE601136"
 ---
 # Linux
 
-Personal reference, mainly for Ubuntu/Debian with GNOME. Commands are examples: package names, device names, desktop shortcuts, and paths depend on the installed system. Reviewed and DNS notes merged on 2026-09-27.
+Personal reference, mainly for Ubuntu/Debian with GNOME. Commands are examples: package names, device names, desktop shortcuts, and paths depend on the installed system. DNS notes merged on 2026-09-27; correctness and readability reviewed on 2026-09-30. Machine-specific observations are historical unless explicitly stated otherwise. Commands were reviewed without changing system settings or running installation, disk, firewall, or service operations. Package availability varies by release; check the configured repositories before installing older applications.
+
+## Contents
+
+- [[#Configuration]]
+- [[#Install & Recovery]]
+- [[#System Configuration]]
+- [[#Command Reference]]
+- [[#Development]]
+- [[#IPC & Concurrency]]
+- [[#Networking & Servers]]
+- [[#Software]]
+- [[#Git]]
+- [[#Troubleshooting Collection]]
+- [[#Git Reference & CI/CD]]
+- [[#固定 GNOME 德语键盘布局：防止登录后重置为 English]]
+- [[#Wayland application rendering and keyboard troubleshooting]]
 
 ## Configuration
 
@@ -12,7 +28,7 @@ Personal reference, mainly for Ubuntu/Debian with GNOME. Commands are examples: 
 
 Set XKB options for the GNOME session. Choose one `set` command; each replaces the complete options list. The `reset` command restores the schema default.
 
-``` bash
+```bash
 gsettings set org.gnome.desktop.input-sources xkb-options "['altwin:swap_alt_win', 'ctrl:swapcaps']"
 gsettings set org.gnome.desktop.input-sources xkb-options "['altwin:swap_lalt_lwin', 'ctrl:swapcaps']"
 gsettings reset org.gnome.desktop.input-sources xkb-options
@@ -101,10 +117,17 @@ UEFI repair must account for Secure Boot and Ubuntu's signed shim/GRUB packages;
 
 This erases the selected disk’s partition information; it does **not** recover lost data. Verify the disk with `list disk` and `detail disk` before `clean`.
 
-    WIN+R → diskpart
-    select disk N
-    clean
-    create partition primary
+Open DiskPart with administrative privileges, then replace `N` with the intended disk number:
+
+```text
+list disk
+select disk N
+detail disk
+clean
+create partition primary
+```
+
+Stop after `detail disk` to verify the selection. Creating the partition does not format it or assign a drive letter. `clean` removes partition metadata; it is not a secure erase.
 
 ### Boot Menu Keys
 
@@ -129,7 +152,7 @@ A graphics-driver PPA is optional, not required for the normal distribution-supp
 
 ### Chinese / I18n
 
-``` bash
+```bash
 sudo apt install language-pack-zh-hans
 locale -a | grep zh
 # Only select a locale that exists; this affects the current shell and its children.
@@ -138,10 +161,12 @@ export LC_CTYPE=zh_CN.UTF-8
 
 For Chinese PDF output with pandoc:
 
-``` bash
+```bash
 fc-list -f "%{family}\n" :lang=zh
-pandoc test.org -o test.pdf --pdf-engine=xelatex -V mainfont="AR PL KaitiM GB"
+pandoc test.org -o test.pdf --pdf-engine=xelatex -V CJKmainfont="AR PL KaitiM GB"
 ```
+
+The font must be installed, and XeLaTeX plus the required CJK packages must be available. Pandoc’s `CJKmainfont` selects the CJK font through `xeCJK`; `mainfont` alone does not configure CJK-specific typesetting. See [Pandoc LaTeX variables](https://pandoc.org/MANUAL.html#variables-for-latex).
 
 For Emacs Chinese input, configure Fcitx/Fcitx5 and the desktop input-method integration, or use an Emacs input method. `LC_CTYPE` alone does not install or enable an input method. See [Fcitx](#fcitx-chinese-input).
 
@@ -152,7 +177,7 @@ Historical X11 setup. XScreenSaver does not provide a Wayland session lock. Avoi
 - Source: <https://github.com/alexanderk23/gluqlo> (build from source)
 - Add `gluqlo -root\n\` to `~/.xscreensaver` programs section
 
-``` bash
+```bash
 sudo apt-get install xscreensaver xscreensaver-data-extra xscreensaver-gl-extra
 # Check the desktop/session integration before replacing its locker
 ```
@@ -165,7 +190,7 @@ sudo apt-get install xscreensaver xscreensaver-data-extra xscreensaver-gl-extra
 
 - If needed, switch from Wayland to Xorg:
 
-  ``` bash
+  ```bash
   # If this Ubuntu release offers an Xorg session, select it at login.
   # GDM system-wide setting, where supported: /etc/gdm3/custom.conf
   # [daemon]
@@ -174,7 +199,7 @@ sudo apt-get install xscreensaver xscreensaver-data-extra xscreensaver-gl-extra
 
 ### Zsh + Powerlevel10k
 
-``` bash
+```bash
 sudo apt install zsh
 # Download MesloLGS NF font
 # Clone powerlevel10k: git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ~/powerlevel10k
@@ -187,14 +212,14 @@ After cloning, add `source ~/powerlevel10k/powerlevel10k.zsh-theme` to `~/.zshrc
 
 For an X11 session, disable the touchpad (`xinput` does not configure native Wayland devices):
 
-``` bash
+```bash
 xinput list                          # find touchpad NAME and ID
 xinput set-prop 'NAME' 'Device Enabled' 0
 ```
 
 Add to `~/.bashrc`:
 
-``` bash
+```bash
 alias tpOff="xinput set-prop 'SYNA1D31:00 06CB:CD48 Touchpad' 'Device Enabled' 0"
 alias tpOn="xinput set-prop 'SYNA1D31:00 06CB:CD48 Touchpad' 'Device Enabled' 1"
 ```
@@ -203,14 +228,14 @@ Autostart disable at graphical login (X11 only): create `~/.config/autostart/xin
 
 Map Caps Lock to an additional Ctrl key (this is not a swap):
 
-``` bash
+```bash
 setxkbmap -option ctrl:nocaps   # X11
 # System XKB configuration, where used: XKBOPTIONS="ctrl:nocaps"
 ```
 
 Right-click on touchpad:
 
-``` bash
+```bash
 gsettings set org.gnome.desktop.peripherals.touchpad click-method areas
 ```
 
@@ -236,7 +261,7 @@ Personal bindings; these are not universal desktop defaults. `C` = Ctrl, `M` = A
 
 Create desktop entry in `~/.config/autostart/`, e.g. for thunderbird:
 
-``` conf
+```conf
 [Desktop Entry]
 Type=Application
 Exec=/usr/bin/thunderbird
@@ -248,9 +273,9 @@ Name=thunderbird
 
 ### Firewall
 
-Use the firewall manager configured on the system; Ubuntu may use UFW instead. The commands below affect firewalld’s default zone unless `--zone=ZONE` is supplied. The add/remove commands are alternatives; reload after the intended change.
+Use the firewall manager configured on the system; Ubuntu may use UFW instead. The commands below affect firewalld’s default zone unless `--zone=ZONE` is supplied. Do not enable a second firewall manager without planning its interaction with the existing one. Identify the interface’s zone with `sudo firewall-cmd --get-active-zones`. The add/remove commands are alternatives; reload after the intended change.
 
-``` bash
+```bash
 sudo apt install firewalld
 sudo systemctl enable --now firewalld
 sudo firewall-cmd --add-port=80/tcp --permanent
@@ -279,7 +304,7 @@ This drops clean page cache and reclaimable dentries/inodes; it does not free ap
 
 2.  Create `~/.local/share/applications/myapp.desktop` for the current user (create the directory if needed):
 
-    ``` conf
+    ```conf
     [Desktop Entry]
     Version=1.0
     Type=Application
@@ -293,7 +318,7 @@ This drops clean page cache and reclaimable dentries/inodes; it does not free ap
 
 ### Hostname
 
-``` bash
+```bash
 hostnamectl
 sudo hostnamectl set-hostname NEWNAME
 cat /etc/hostname
@@ -324,15 +349,15 @@ Follow the generated configuration for your shell to bind `Ctrl-R`/`hh`. Availab
 
 ### File & Directory
 
-``` bash
+```bash
 find ~ -name filename                # find by name
 tree -L 2                            # directory tree
-alias open='nautilus' && open .      # open file manager
+xdg-open .                          # use the desktop’s default file manager
 ```
 
 ### Text Processing
 
-``` bash
+```bash
 grep -n "pattern" file.txt           # search with line numbers
 sort -k3,3 file.txt                  # sort whitespace-separated field 3
 sort -t, -k3,3 test.csv              # simple comma-delimited data, not quoted CSV
@@ -346,7 +371,7 @@ find . -type f -name "*.md" -exec sed -i 's/foo/bar/g' {} +
 
 Soft link (symlink, shortcut):
 
-``` bash
+```bash
 ln -s /absolute/path/to/source linkname
 ```
 
@@ -354,7 +379,7 @@ An absolute target keeps pointing to the same path if the symlink moves; moving 
 
 Hard link:
 
-``` bash
+```bash
 ln filename linkname
 ```
 
@@ -372,7 +397,7 @@ On traditional Unix filesystems, a directory’s link count is usually 2 plus it
 | -z     | gzip         |
 | -f     | specify file |
 
-``` bash
+```bash
 tar -zvcf archive.tar.gz dir/
 tar -zvxf archive.tar.gz
 ```
@@ -392,6 +417,8 @@ tar -zvxf archive.tar.gz
 
 ### Terminal Shortcuts
 
+These depend on terminal bindings and shell line-editing mode. The editing keys below assume common Emacs-style bindings; application keymaps can override them.
+
 |       |                      |
 |-------|----------------------|
 | S-C-c | copy from terminal   |
@@ -403,14 +430,14 @@ tar -zvxf archive.tar.gz
 
 ### Process & Port Inspection
 
-``` bash
+```bash
 ps aux | grep '[m]ongo'
 sudo ss -ltnp 'sport = :80'          # listening TCP sockets on port 80
 ```
 
 ### Output Redirection
 
-``` bash
+```bash
 command >> file          # append stdout
 command >> file 2>&1    # append stdout + stderr
 cat 110.txt > 111.txt     # copy contents; truncate destination first
@@ -419,7 +446,7 @@ cat source1.c >> source2.c # append contents; source and destination must differ
 
 ### Misc
 
-``` bash
+```bash
 # Find and uninstall a package
 apt list --installed | grep software
 whereis software
@@ -435,8 +462,8 @@ curl https://ifconfig.me
 # cd to directory of a binary
 cd "$(dirname "$(command -v cling)")"   # only if cling is installed
 
-# Recursive string replace
-find . -type f -name "*.md" -exec sed -i 's/foo/bar/g' {} +
+# GNU sed: preview matches before an intentional in-place replacement.
+# See the Text Processing section for the replacement command.
 ```
 
 ### sed Quick Reference
@@ -451,7 +478,7 @@ find . -type f -name "*.md" -exec sed -i 's/foo/bar/g' {} +
 
 Example:
 
-``` bash
+```bash
 sed -En '/pattern/s/old/new/gp' file.csv  # on matching lines, replace all; print changes
 sed 's/^[[:blank:]]*//' file.csv          # strip leading spaces and tabs
 ```
@@ -460,7 +487,7 @@ sed 's/^[[:blank:]]*//' file.csv          # strip leading spaces and tabs
 
 ### GCC Basics
 
-``` bash
+```bash
 gcc -c file.c -o file.o          # compile only
 gcc file1.o file2.o -o app       # link
 gcc -I ./include main.c -L ./lib -lmylib -o app   # with headers and library
@@ -480,14 +507,14 @@ gcc -I ./include main.c -L ./lib -lmylib -o app   # with headers and library
 
 Build:
 
-``` bash
+```bash
 gcc -c -fPIC *.c -I ../include        # position-independent code
 gcc -shared *.o -o libxxx.so
 ```
 
 Consumer compiles:
 
-``` bash
+```bash
 gcc -I ./include main.c -L ./lib -lxxx -o app
 ```
 
@@ -499,7 +526,7 @@ Runtime — the loader must find the `.so`:
 
 One-shot build example:
 
-``` bash
+```bash
 gcc -c -fPIC add.c sub.c mult.c divi.c
 gcc -shared -o libmymath.so add.o sub.o mult.o divi.o
 gcc -L. -Wl,-rpath,'$ORIGIN' -Wall -o mathDemo mathDemo.c -lmymath
@@ -520,21 +547,21 @@ Recipes begin with a literal TAB, not spaces. These examples track `.c` changes;
 
 Format:
 
-``` makefile
+```makefile
 target: dependencies
 	command
 ```
 
 V1 — simplest:
 
-``` makefile
+```makefile
 app: main.c add.c sub.c mul.c
 	gcc main.c add.c sub.c mul.c -o app
 ```
 
 V2 — incremental (only recompile changed files):
 
-``` makefile
+```makefile
 app: main.o add.o sub.o mul.o
 	gcc main.o add.o sub.o mul.o -o app
 %.o: %.c
@@ -543,7 +570,7 @@ app: main.o add.o sub.o mul.o
 
 V3 — automatic variables and wildcard:
 
-``` makefile
+```makefile
 src = $(wildcard ./*.c)
 obj = $(patsubst %.c, %.o, $(src))
 target = app
@@ -592,7 +619,7 @@ One-way: server sends type 100, client receives type 100. Two-way: fork server �
 
 #### Named Pipe (FIFO)
 
-``` bash
+```bash
 mkfifo ./myfifo
 ```
 
@@ -600,7 +627,7 @@ One process opens `O_WRONLY`, another `O_RDONLY`. Blocking opens normally wait f
 
 #### Unnamed Pipe
 
-``` c
+```c
 int fd[2];
 pipe(fd);
 // fd[0] for read, fd[1] for write
@@ -625,23 +652,27 @@ pipe(fd);
 | shmget() | create/open shared memory       |
 | shmat()  | attach to process address space |
 | shmdt()  | detach                          |
-| shmctl() | destroy                         |
+| shmctl() | inspect/control; `IPC_RMID` marks the segment for deletion |
 | semget() | create semaphore set            |
 | semctl() | control / destroy semaphore     |
 | semop() | perform semaphore operations |
 
 Inspect / clean up:
 
-``` bash
+```bash
 ipcs -m    # shared memory
 ipcs -q    # message queues
 ipcs -s    # semaphores
-ipcrm -m <shmid>
+ipcrm -m SHMID  # Replace SHMID with the specific segment ID to remove
 ```
+
+Shared memory marked with `IPC_RMID` is destroyed after its last attachment is detached; `shmdt()` only detaches the calling process. See [`shmctl`](https://man7.org/linux/man-pages/man2/shmctl.2.html).
 
 Prefer `sigaction()` for signal handlers. Handlers may call only async-signal-safe functions; `printf()` is not one. `alarm(0)` cancels a pending alarm.
 
 ### Multi-Thread (pthreads)
+
+The C blocks below are fragments, not standalone programs. Include `<pthread.h>` and supply an enclosing function, a declared `pthread_t tid`, a compatible `void *func(void *)` entry point, and any argument data where needed.
 
 Compile and link with `-pthread`. Examples omit error handling for brevity; check return values (most pthread functions return an error number directly). Cancellation is a request, usually acted on at cancellation points; asynchronous cancellation can leave shared state inconsistent.
 
@@ -658,7 +689,7 @@ Compile and link with `-pthread`. Examples omit error handling for brevity; chec
 
 Mutex:
 
-``` c
+```c
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_lock(&mutex);
 // critical section
@@ -667,7 +698,7 @@ pthread_mutex_unlock(&mutex);
 
 Read-Write Lock:
 
-``` c
+```c
 pthread_rwlock_t rwlock;
 pthread_rwlock_init(&rwlock, NULL);
 pthread_rwlock_wrlock(&rwlock);   // exclusive write section
@@ -683,7 +714,7 @@ Do not acquire a read lock while holding the same write lock: it may deadlock or
 
 Thread attributes:
 
-``` c
+```c
 pthread_attr_t attr;
 pthread_attr_init(&attr);
 pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE); // or DETACHED
@@ -696,6 +727,8 @@ pthread_attr_destroy(&attr);
 ## Networking & Servers
 
 ### DNS and Name Resolution
+
+For how DNS relates to routes, gateways, and NAT, see [Network](Network.md).
 
 Merged from `Linux_DNS_Resolution.org` (Org ID `C28DE385-19F7-4B66-AB36-7A12DD2CF6DA`). The original note’s “current setup” was a historical observation, not a verified description of the machine in use now.
 
@@ -751,14 +784,14 @@ On Ubuntu, `dig` is provided by `dnsutils`. Change persistent DNS settings throu
 
 ### SSH
 
-``` bash
+```bash
 ssh user@ip
 # For automation, use an SSH key and agent rather than a literal password.
 ```
 
 Passwordless login:
 
-``` bash
+```bash
 ssh-keygen -t ed25519                  # choose a file and passphrase; do not overwrite an existing key
 ssh-copy-id user@ip
 ssh-copy-id localhost                  # (username ≠ hostname)
@@ -770,7 +803,7 @@ Root login is usually unnecessary: connect as a normal user and use `sudo`. If a
 
 Install: <https://docs.docker.com/engine/install/ubuntu/> NVIDIA container toolkit: <https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html>
 
-``` bash
+```bash
 getent group docker || sudo groupadd docker
 sudo usermod -aG docker "$USER"
 # Log out and back in to refresh supplementary groups.
@@ -894,7 +927,7 @@ The standalone HTTP challenge needs public DNS pointing to this server and inbou
 
 ### GWDG Cloud Server
 
-Historical personal workflow; activation, portal navigation, and image usernames have not been verified for the current service. Confirm them in GWDG’s current documentation before use.
+Historical personal workflow; activation, portal navigation, and image usernames have not been verified for the current service. These are recorded steps, not a current provisioning guide. The documentation endpoint could not be retrieved during this review; confirm the workflow through GWDG before use.
 
 1.  Email support@gwdg.de with university email to request cloud server activation
 2.  GWDG website → Cloud Server → Self-service → Create Instance
@@ -909,7 +942,7 @@ Historical personal workflow; activation, portal navigation, and image usernames
 
 #### Okular
 
-``` bash
+```bash
 sudo apt-get install okular
 ```
 
@@ -928,7 +961,7 @@ Personal/custom bindings from the original notes (not stock Okular shortcuts). T
 
 #### evince
 
-``` bash
+```bash
 evince file.pdf
 ```
 
@@ -936,20 +969,20 @@ evince file.pdf
 
 Rewrite a PDF through Ghostscript (not a guarantee that all active content is sanitized; output may lose annotations, forms, or other features):
 
-``` bash
+```bash
 gs -dNOPAUSE -sDEVICE=pdfwrite -sOUTPUTFILE=out.pdf -dBATCH in.pdf
 ```
 
 Re-encode using the `/prepress` preset (may increase size; compare quality and size rather than assuming compression):
 
-``` bash
+```bash
 gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/prepress \
    -dNOPAUSE -dQUIET -dBATCH -sOutputFile=compressed.pdf input.pdf
 ```
 
 #### xournal
 
-``` bash
+```bash
 sudo apt install xournal
 ```
 
@@ -957,13 +990,13 @@ sudo apt install xournal
 
 #### mpv
 
-``` bash
+```bash
 sudo apt install mpv
 ```
 
 Config at `~/.config/mpv/mpv.conf` — key options:
 
-``` conf
+```conf
 no-osd-bar
 save-position-on-quit
 no-border
@@ -980,7 +1013,7 @@ Options depend on the installed version; see the [mpv manual](https://mpv.io/man
 
 Primarily an X11 recorder; native Wayland screen capture requires a compatible recorder/portal workflow. The shortcut below is configuration-dependent.
 
-``` bash
+```bash
 sudo apt install simplescreenrecorder
 alias ssr='simplescreenrecorder'
 # Ctrl+Shift+Alt+V to start/pause
@@ -988,19 +1021,21 @@ alias ssr='simplescreenrecorder'
 
 #### kmplayer
 
-``` bash
+```bash
 sudo apt install kmplayer
 ```
 
 ### Dictionary (stardict)
 
-``` bash
+```bash
 sudo apt install stardict sdcv
-# Download dictionaries from http://download.huzheng.org/
-# Extract and place in /usr/share/stardict/dic/
-bzip2 -dk *.bz2
-for i in *.tar.bz2; do sudo tar -xjvf "$i" -C /usr/share/stardict/dic; done
+mkdir -p ~/.stardict/dic
+# Inspect one downloaded archive, then extract it into the user dictionary directory.
+tar -tjf dictionary.tar.bz2
+tar -xjf dictionary.tar.bz2 -C ~/.stardict/dic
 ```
+
+`dictionary.tar.bz2` is a placeholder for the chosen dictionary archive. The historical catalog was `http://download.huzheng.org/`; confirm the archive source and license. Do not run `bzip2` first: `tar -xjf` already decompresses bzip2. System-wide dictionaries can instead be installed under `/usr/share/stardict/dic/`.
 
 ### Email (thunderbird)
 
@@ -1020,24 +1055,28 @@ for i in *.tar.bz2; do sudo tar -xjvf "$i" -C /usr/share/stardict/dic; done
 
 ### IPFS
 
-``` bash
-# Install Kubo (formerly go-ipfs), then:
+Install Kubo (formerly go-ipfs). Initialize only a new repository:
+
+```bash
 ipfs init
 ipfs config edit
 ipfs id
-
-# Add and retrieve
-echo "hello" > file.txt
-ipfs add file.txt              # get hash
-ipfs cat <hash>
-
-# Publish directory
-ipfs add -r .
-ipfs name publish <dir_hash>
-
-# Run ipfs daemon to start the node/API.
-# Web UI (while running): http://localhost:5001/webui
+ipfs daemon
 ```
+
+Keep the daemon running; use another terminal for commands:
+
+```bash
+printf 'hello\n' > file.txt
+file_cid=$(ipfs add -Q file.txt)
+ipfs cat "$file_cid"
+
+# Use a directory whose contents you intend to share.
+directory_cid=$(ipfs add -Qr ./public-directory)
+ipfs name publish "/ipfs/$directory_cid"
+```
+
+A CID identifies content; IPNS publishes a mutable name pointing to that content. Adding files does not guarantee long-term availability from other peers. Avoid publishing the whole working directory accidentally. The local Web UI is normally at `http://localhost:5001/webui` while the daemon runs. See [Kubo CLI](https://docs.ipfs.tech/reference/kubo/cli/).
 
 ### Fcitx (Chinese Input)
 
@@ -1055,13 +1094,13 @@ The older Sogou setup used Fcitx 4 and a vendor `.deb` (`sudo apt install ./sogo
 
 ### Graphviz (dot)
 
-``` bash
+```bash
 dot -Tpng -O file.dot
 ```
 
 ### KDE Connect (Linux ↔ Android)
 
-Install on both devices; same network → auto-discovery. Files land in `Downloads/`.
+Install on both devices and pair them. Discovery usually works on the same reachable LAN, but firewall rules, VPNs, or wireless client isolation can prevent it. Received-file locations depend on the device and plugin settings; `Downloads/` is a common default.
 
 ### Photopea (Web-based image editor)
 
@@ -1070,13 +1109,13 @@ Install on both devices; same network → auto-discovery. Files land in `Downloa
 
 ### File Manager (ranger)
 
-``` bash
+```bash
 sudo apt install ranger
 ```
 
 ### Image Viewer (eog)
 
-``` bash
+```bash
 eog image.png
 ```
 
@@ -1094,7 +1133,7 @@ Historical personal keymap; confirm bindings in the installed Warp version. `Ctr
 
 ### Setup
 
-``` bash
+```bash
 sudo apt install git
 git config --global user.name "name"
 git config --global user.email "email"
@@ -1103,7 +1142,7 @@ ssh-keygen -t ed25519 -C "email"       # add the public key to GitHub
 
 ### Basic Workflow
 
-``` bash
+```bash
 git init -b main
 git remote add origin git@github.com:user/repo.git
 git add -A
@@ -1113,20 +1152,20 @@ git push -u origin main
 
 Amend the last commit (creates a replacement commit with a new ID; rewrites history):
 
-``` bash
+```bash
 git commit --amend
 ```
 
 ### Branching
 
-``` bash
+```bash
 git switch -c development
 # ... work, commit, push ...
 git push -u origin development
 
 # Merge to main
 git switch main
-git pull origin main
+git pull --ff-only origin main
 git merge development
 git push origin main
 
@@ -1137,7 +1176,7 @@ git push origin --delete development
 
 Track remote branch:
 
-``` bash
+```bash
 git switch --track origin/ui-mockup
 ```
 
@@ -1157,6 +1196,8 @@ Reflog recovery is local and time-limited; it cannot recover arbitrary edits tha
 
 ### Magit (Emacs)
 
+`C-x g` requires an Emacs binding to `magit-status`; it is not guaranteed by a plain Emacs installation. `c` opens the commit transient; `c c` starts a normal commit.
+
 | key     | action        |
 |---------|---------------|
 | C-x g   | open magit    |
@@ -1167,27 +1208,35 @@ Reflog recovery is local and time-limited; it cannot recover arbitrary edits tha
 
 ### GitHub
 
-Raw file URL: append `?raw=true` or use the "Raw" button.
+Use the file page’s **Raw** button to obtain its raw-content URL. Query parameters such as `?raw=true` are page-dependent, not a universal transformation for every GitHub URL.
 
 ## Troubleshooting Collection
 
 ### System limit for number of file watchers reached
 
-``` bash
-sudo sysctl -w fs.inotify.max_user_watches=100000
+Inspect the existing limits and the application error first:
+
+```bash
+sysctl fs.inotify.max_user_watches fs.inotify.max_user_instances
 ```
+
+Do not blindly set `max_user_watches=100000`: that could lower the current limit. If watch exhaustion is confirmed, choose a larger limit appropriate for the workload; for example, only when the current value is lower:
+
+```bash
+sudo sysctl -w fs.inotify.max_user_watches=524288
+```
+
+This runtime change does not persist after reboot. For persistence, place the chosen assignment in a dedicated file under `/etc/sysctl.d/` and load that file with `sudo sysctl -p /etc/sysctl.d/99-inotify.conf`. Instance exhaustion is a separate limit; increasing watches alone will not fix it. See [inotify limits](https://man7.org/linux/man-pages/man7/inotify.7.html).
 
 ### Right-click on touchpad not working
 
-``` bash
-gsettings set org.gnome.desktop.peripherals.touchpad click-method areas
-```
+See [[#Keyboard & Touchpad]] for the GNOME `click-method areas` setting.
 
 ### Package Manager Locks / Broken Packages
 
 For a lock error, let the active APT/dpkg operation finish and inspect the owning process; do not delete lock files while a package manager is running. For interrupted configuration or broken dependencies:
 
-``` bash
+```bash
 sudo dpkg --configure -a
 sudo apt --fix-broken install
 ```
@@ -1238,13 +1287,13 @@ Source: [Linux in Craft](craftdocs://open?spaceId=f0e27734-d8b8-47ce-be9d-9b35de
 
 #### 问题与排查结论
 
-系统键盘已设为 German（`de`），但每次注销并重新登录后，GNOME 输入源仍恢复为 English（`us`）。修改 AccountsService 也无效，设置会在登录过程中再次被覆盖；最终通过系统级 dconf 策略锁定 GNOME 输入源解决。
+原笔记记录：系统键盘已设为 German（`de`），但每次注销并重新登录后，GNOME 输入源仍恢复为 English（`us`）。修改 AccountsService 也无效，设置会在登录过程中再次被覆盖；最终通过系统级 dconf 策略锁定 GNOME 输入源解决。锁定能防止改写，但本身不能确认究竟是哪个组件在覆盖配置。
 
 #### 最终方案：系统级 dconf 策略
 
 **1 · 准备配置目录**
 
-``` bash
+```bash
 sudo mkdir -p /etc/dconf/profile /etc/dconf/db/local.d/locks
 ```
 
@@ -1252,7 +1301,7 @@ sudo mkdir -p /etc/dconf/profile /etc/dconf/db/local.d/locks
 
 编辑 `/etc/dconf/profile/user`，确保包含以下两行；如已有其他配置，保留原有条目：
 
-``` text
+```text
 user-db:user
 system-db:local
 ```
@@ -1261,7 +1310,7 @@ system-db:local
 
 创建或编辑 `/etc/dconf/db/local.d/00-keyboard`：
 
-``` text
+```text
 [org/gnome/desktop/input-sources]
 sources=[('xkb', 'de')]
 ```
@@ -1270,19 +1319,19 @@ sources=[('xkb', 'de')]
 
 创建或编辑 `/etc/dconf/db/local.d/locks/00-keyboard`：
 
-``` text
+```text
 /org/gnome/desktop/input-sources/sources
 ```
 
 **5 · 应用并验证**
 
-``` bash
+```bash
 sudo dconf update
 ```
 
 注销并重新登录，然后检查：
 
-``` bash
+```bash
 gsettings get org.gnome.desktop.input-sources sources
 # 预期：[('xkb', 'de')]
 
@@ -1294,7 +1343,7 @@ gsettings writable org.gnome.desktop.input-sources sources
 
 #### 最终结构与结论
 
-``` text
+```text
 Ubuntu / GNOME
 └── German（de）· QWERTZ 键盘布局
 
@@ -1309,124 +1358,77 @@ Fcitx5
 锁定后，用户也无法在 GNOME 设置中添加或切换其他输入源。若需撤销，删除锁文件中的该键路径（保留其他策略），运行 `sudo dconf update`，然后重新登录。系统默认值文件可按需要保留或修改。参考：[GNOME dconf 锁定文档](https://help.gnome.org/system-admin-guide/dconf-lockdown.html)。
 
 
+## Wayland application rendering and keyboard troubleshooting
 
-## Fix fuzzy UI and wrong keyboard layout in Emacs and ChatGPT on Ubuntu Wayland
+### Recorded symptoms and scope
 
-On the new Lenovo ThinkPad running Ubuntu with GNOME Wayland, both Emacs and the ChatGPT/Codex desktop application initially showed two related problems: the user interface and fonts appeared noticeably fuzzy, especially compared with native GNOME applications, and although the system keyboard layout was correctly configured as German, some applications interpreted the keyboard as English/QWERTY, causing keys such as `Y/Z`, `@`, `€`, `ä`, `ö`, `ü`, and `ß` to behave incorrectly.
+On a Lenovo ThinkPad running Ubuntu/GNOME Wayland, the original notes reported fuzzy text and incorrect German key mapping in Emacs and an application launched as `chatgpt`. Native GNOME applications worked correctly. Switching application backends reportedly fixed both symptoms.
 
-The system-wide GNOME, German keyboard, and Fcitx5 configuration were not the real cause, because the same keyboard and display settings worked correctly in the rest of the desktop. The problem was that affected applications were using a non-native rendering/input path rather than integrating directly with Wayland.
+This points to an application/backend interaction, but does not prove a single root cause or rule out all scaling, keyboard, and input-method configuration issues. The package behind `/usr/lib/chatgpt/ChatGPT` was not available for inspection here. Its name does not establish that it is an official OpenAI application, nor that the same instructions apply to Codex or other ChatGPT clients.
 
-### Emacs
+### Emacs PGTK
 
-The Emacs problem was fixed by installing the native GTK/Wayland build:
+Where the Ubuntu release provides this package:
 
-```
+```bash
 sudo apt update
 sudo apt install emacs-pgtk
 ```
 
-After switching to `emacs-pgtk`, both problems disappeared:
+Quit the old Emacs process, including any daemon if that is what `emacsclient` uses, and launch the intended build. In a graphical Emacs frame, evaluate `window-system`; `pgtk` identifies the PGTK backend. Check `M-x emacs-version` as well. PGTK supports Wayland, but package installation alone does not prove an existing process changed backends. See [GNU Emacs PGTK support](https://www.gnu.org/software/emacs/manual/html_node/efaq/New-in-Emacs-29.html).
 
-- fonts and UI became sharp;
-    
-- the German keyboard layout worked correctly.
-    
+### Chromium-based application: test a fresh process
 
-This confirmed that the system Wayland and keyboard configuration itself was correct.
+Chromium supports `--ozone-platform=wayland` when built with the Wayland backend. An Electron application can opt into single-instance behavior, so a second launch may hand off to an existing process instead of applying new startup flags. These are framework capabilities, not proof of this unidentified package's implementation. Sources: [Chromium Ozone](https://chromium.googlesource.com/chromium/src.git/+/HEAD/docs/ozone_overview.md), [Electron single-instance API](https://www.electronjs.org/docs/latest/api/app#apprequestsingleinstancelockadditionaldata).
 
-### ChatGPT / Codex
+For the specific package recorded in the original note, inspect first:
 
-ChatGPT behaved similarly, but closing its window did not necessarily terminate the application completely. The main process could remain running in the background:
-
-```
-/usr/lib/chatgpt/ChatGPT
-```
-
-Because ChatGPT uses a single-instance Chromium-based architecture, launching it again with different command-line parameters could simply reconnect to the already-running instance instead of creating a fresh process. Therefore the Wayland option appeared to have no effect.
-
-The important step was to fully terminate the existing ChatGPT process:
-
-```
-pkill -x ChatGPT
-```
-
-Verify that the main process has stopped:
-
-```
+```bash
+command -v chatgpt
 pgrep -af '^/usr/lib/chatgpt/ChatGPT'
 ```
 
-Then start ChatGPT explicitly using native Wayland:
+Save work and use the application's **Quit** action. If it remains running and the process name has been confirmed, the original workaround was:
 
+```bash
+pkill -x ChatGPT
+pgrep -af '^/usr/lib/chatgpt/ChatGPT'
 ```
+
+`pkill` sends a termination signal to matching processes; it is not a guarantee of graceful shutdown. No output from this `pgrep` only establishes that its particular path pattern has no match.
+
+Once the old instance has exited, test the recorded command on a Wayland session:
+
+```bash
 chatgpt --ozone-platform=wayland
 ```
 
-After a real restart in this mode, both problems disappeared:
+Test sharpness and German keys such as `Y/Z`, `@`, `€`, `ä`, `ö`, `ü`, and `ß`. The original note reports success on that machine; this was not reproduced in the present review.
 
-- ChatGPT fonts and UI became sharp;
-    
-- the German keyboard mapping worked correctly.
-    
+### Persist a successful launch option
 
-### Permanent ChatGPT fix
+Only after the flag works, locate the actual desktop entry and make a user override. For the recorded path:
 
-Starting ChatGPT from the normal GNOME application launcher can revert to the default launch mode, so the Wayland option should be added permanently to the user-level desktop launcher.
-
-First create a local copy of the application launcher:
-
-```
+```bash
 mkdir -p ~/.local/share/applications
-
-cp /usr/share/applications/chatgpt.desktop \
-   ~/.local/share/applications/chatgpt.desktop
+# -i prompts before overwriting an existing personal override.
+cp -i /usr/share/applications/chatgpt.desktop \
+  ~/.local/share/applications/chatgpt.desktop
 ```
 
-Edit:
+Edit the copied entry. Preserve its actual executable, quoting, existing arguments, and field codes. For an entry that originally reads `Exec=chatgpt %U`, the edited line is:
 
-```
-emacs ~/.local/share/applications/chatgpt.desktop
-```
-
-Change the `Exec` line from something like:
-
-```
-Exec=chatgpt %U
-```
-
-to:
-
-```
+```ini
 Exec=chatgpt --ozone-platform=wayland %U
 ```
 
-Optionally refresh the desktop application database:
+Desktop entry `Exec` values are not general shell commands. Also inspect any desktop-action `Exec` lines and `DBusActivatable`: a D-Bus activation path may bypass the main `Exec` line. See the [Exec specification](https://specifications.freedesktop.org/desktop-entry-spec/latest/exec-variables.html) and [D-Bus activation](https://specifications.freedesktop.org/desktop-entry-spec/latest/dbus.html).
 
-```
-update-desktop-database ~/.local/share/applications 2>/dev/null || true
-```
+If installed, validate and refresh the desktop-entry database:
 
-Then terminate any currently running ChatGPT process once more:
-
-```
-pkill -x ChatGPT
+```bash
+desktop-file-validate ~/.local/share/applications/chatgpt.desktop
+update-desktop-database ~/.local/share/applications
 ```
 
-After that, start ChatGPT normally from the GNOME application menu.
-
-### Result
-
-The final working configuration is:
-
-```
-GNOME Wayland
-├── Emacs PGTK
-│   ├── sharp UI
-│   └── correct German keyboard
-│
-└── ChatGPT --ozone-platform=wayland
-    ├── sharp UI
-    └── correct German keyboard
-```
-
-The important conclusion is that the GNOME German keyboard and Fcitx5 configuration did not need to be changed. The issue was application-specific: Emacs needed the native `pgtk` build, while ChatGPT needed a genuine process restart and a permanent native-Wayland launch option.
+Quit the old instance and launch from the menu. To undo the workaround, remove the added flag from the user override, or remove that override if it contains no other customizations. A copied launcher can become stale after package updates, so compare it with the vendor entry when troubleshooting later.

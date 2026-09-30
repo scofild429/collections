@@ -7,7 +7,27 @@ org_id: "72def127-0901-47b3-b8b8-d9d56575ea4a"
 
 ## Zellij
 
-Default mode is `locked`. Press `Alt a` to enter `normal` mode, then switch to other modes.
+This is a **saved personal keymap**, not the stock Zellij defaults. In this saved profile, the initial mode is `locked` and `Alt a` enters `normal`. The original KDL for this profile is not included here, so the detailed tables are preserved as recorded, not verified against a matching configuration.
+
+### Local configuration differs
+
+The local `~/.config/zellij/config.kdl` inspected on 2026-09-30 differs from the saved profile:
+
+| Setting | Saved profile below | Local file inspected |
+|---|---|---|
+| Unlock | `Alt a` | `ESC` |
+| Enter pane / tab mode | `p` / `t` in normal mode | `Ctrl p` / `Ctrl t` outside locked mode |
+| Enter resize / scroll mode | `r` / `s` | `Ctrl n` / `Ctrl s` outside locked mode |
+| Enter move / session mode | `m` / `o` | `Ctrl h` / `Ctrl o` outside locked mode |
+| Pane/tab actions return to | Locked mode | Usually normal mode |
+| Alt shortcuts in locked mode | Listed below | Excluded by `shared_except "locked"` |
+| Theme | `tokyo-night` | `solarized-dark` |
+| Pane frames | Explicitly disabled | `pane_frames false` is commented out |
+| Scrollback editor | Explicit Emacs wrapper | No explicit override in the file |
+
+The local file also contains overlapping `ESC` / `esc` bindings; resolve those in the actual configuration before assuming which target mode wins. A file on disk does not prove which configuration a running session loaded. No Zellij configuration was changed during this review.
+
+For another machine, check its selected configuration, terminal key handling, and version. See [Zellij keybindings](https://zellij.dev/documentation/keybindings). The following tables describe only the saved profile.
 
 ### Locked Mode
 
@@ -52,29 +72,9 @@ Enter from locked via `Alt a`.
 | `esc`    | → Locked mode  |
 | `Ctrl q` | Quit           |
 
-#### Alt Shortcuts (same as Locked)
+#### Alt shortcuts
 
-| Key           | Action               |
-|---------------|----------------------|
-| `Alt h`       | MoveFocusOrTab left  |
-| `Alt j`       | MoveFocus down       |
-| `Alt k`       | MoveFocus up         |
-| `Alt l`       | MoveFocusOrTab right |
-| `Alt left`    | MoveFocusOrTab left  |
-| `Alt down`    | MoveFocus down       |
-| `Alt up`      | MoveFocus up         |
-| `Alt right`   | MoveFocusOrTab right |
-| `Alt n`       | NewPane              |
-| `Alt f`       | ToggleFloatingPanes  |
-| `Alt +`       | Resize Increase      |
-| `Alt -`       | Resize Decrease      |
-| `Alt =`       | Resize Increase      |
-| `Alt [`       | PreviousSwapLayout   |
-| `Alt ]`       | NextSwapLayout       |
-| `Alt i`       | MoveTab left         |
-| `Alt o`       | MoveTab right        |
-| `Alt p`       | TogglePaneInGroup    |
-| `Alt Shift p` | ToggleGroupMarking   |
+Use the same Alt shortcuts as [[#Locked Mode]] in this saved profile.
 
 ### Pane Mode
 
@@ -303,25 +303,9 @@ Enter from scroll via `f` → type query → `enter`.
 | `w` | Toggle Wrap              |
 | `o` | Toggle WholeWord         |
 
-#### Scroll (shared with Scroll mode)
+#### Scrolling
 
-| Key        | Action                  |
-|------------|-------------------------|
-| `j`        | ScrollDown              |
-| `k`        | ScrollUp                |
-| `down`     | ScrollDown              |
-| `up`       | ScrollUp                |
-| `d`        | HalfPageScrollDown      |
-| `u`        | HalfPageScrollUp        |
-| `h`        | PageScrollUp            |
-| `l`        | PageScrollDown          |
-| `left`     | PageScrollUp            |
-| `right`    | PageScrollDown          |
-| `PageUp`   | PageScrollUp            |
-| `PageDown` | PageScrollDown          |
-| `Ctrl b`   | PageScrollUp            |
-| `Ctrl f`   | PageScrollDown          |
-| `Ctrl c`   | ScrollToBottom → locked |
+Search mode shares the movement/page keys and `Ctrl c` action listed under [[#Scroll Actions]].
 
 #### Mode Switching
 
@@ -393,6 +377,8 @@ Enter from pane via `c`. Type new name, then `enter` to confirm.
 | `Ctrl c` | → Locked mode              |
 
 ### Configuration Notes
+
+Recorded values for the saved profile; see the local differences above. `hide_session_name` belongs inside the `ui { pane_frames { ... } }` configuration block, rather than at the top level. See [Zellij configuration options](https://zellij.dev/documentation/options.html).
 
 - Config file: `~/.config/zellij/config.kdl`
 - Theme: `tokyo-night`

@@ -4,165 +4,165 @@ title: "Ansible"
 
 # Ansible
 
-## Configuration override order for all parameters (lowest to highest priority)
+## Configuration selection and precedence
 
-### order
+### Which configuration file is loaded?
 
-Config file search order:
+Ansible searches in this order and uses the **first file found**, rather than merging the files:
 
-- *Priority lowest*: /etc/ansible/ansible.cfg — default global configuration file.
-- *Priority low*: ~/.ansible.cfg — per-user configuration in the home directory.
-- *Priority high*: ansible.cfg in the current working directory (project folder) overrides the above.
-- *Priority highest*: `$ANSIBLE_CONFIG` — custom config file path. If set, Ansible ignores the default search paths and uses only this file.
-  - Example: `ANSIBLE_CONFIG=/work/newname.cfg ansible-playbook ...`
+1. The path specified by `ANSIBLE_CONFIG`, if set.
+2. `ansible.cfg` in the current working directory.
+3. `~/.ansible.cfg`.
+4. `/etc/ansible/ansible.cfg`.
 
-Parameter value override order:
+Do not assume that setting `ANSIBLE_CONFIG` to a missing file guarantees use of that configuration; verify the selected file with `ansible --version`. Automatic loading from a world-writable current directory is restricted. See [configuration-file discovery](https://docs.ansible.com/ansible/latest/reference_appendices/config.html).
 
-- Values from the selected config file are used.
-- Environment variables for individual settings (e.g., `ANSIBLE_HOST_KEY_CHECKING`) override config file values.
-
-``` bash
-ansible-config list
-ansible-config view
-ansible-config dump
+```bash
+ANSIBLE_CONFIG=/work/ansible.cfg ansible-playbook -i inventory.ini site.yml
 ```
 
-### Ansible background
+The paths above are placeholders for an existing project.
 
-- default use SFTP, but can be force to SCP
-- SCP need SSH connection do other stuffs, it is only for file transfer
-- synchronize module use rsync for large file transfer
+### Which setting wins?
 
-### Modules vs. Roles vs. Collections
+The broad categories, from lower to higher precedence, are:
 
-Module  
-A single script or tool that executes one specific action (e.g., `ansible.builtin.copy`).
+| Category | Examples |
+|---|---|
+| Configuration | Selected `ansible.cfg`, then a supported environment override |
+| Command-line options | `-u deploy` |
+| Playbook keywords | `remote_user: deploy` |
+| Variables | Inventory `ansible_user`, play/task variables, extra variables |
+| Direct assignment | Options passed directly to a module or plugin where applicable |
 
-Role  
-A self-contained, reusable directory structure bundling tasks, variables, templates, and files.
+This is not a rule that every parameter supports every source. Consult the setting/plugin documentation. Within variables there is a separate precedence hierarchy; `-e` extra variables have the highest variable precedence. An environment variable is not universally the highest-priority setting.
 
-Legacy Standard  
-Standalone roles uploaded to Ansible Galaxy, formatted as `username.role_name`.
+For example, `ansible_user` from inventory can override `-u`, and `-e ansible_user=deploy` overrides other definitions of that variable. A module argument such as `path` is a directly assigned option; its Jinja expression may still resolve a variable. See [Ansible precedence rules](https://docs.ansible.com/ansible/latest/reference_appendices/general_precedence.html).
 
-- Roles can be called in two ways:
-  - Play-Level (Classic) Called in the `roles:` section. You can pass overriding variables directly beneath the role name.
+### Inspect configuration
 
-    ``` yaml
-    - hosts: webservers
-      roles:
-        - role: namespace.collection.webserver
-          webserver_port: 8080
-    ```
+```bash
+ansible --version                   # Version and selected config file
+ansible-config list                 # Settings, supported sources, defaults
+ansible-config view                 # Contents of the selected config file
+ansible-config dump                 # Effective configuration settings
+ansible-config dump --only-changed  # Settings changed from defaults
+```
 
-  - Task-Level (Dynamic) Triggered inside the `tasks:` list using a module, allowing execution amidst other normal tasks.
+`view` requires a selected configuration file. `dump` is not a report of every resolved host/task variable in a playbook.
 
-    ``` yaml
-    tasks:
-      - name: Call a role mid-play
-        ansible.builtin.include_role:
-          name: namespace.collection.webserver
-    ```
+## Modules, roles, and collections
 
-Collection  
-The modern "shipping container" used to distribute Ansible content. A collection can contain multiple roles, modules, and plugins.
+| Component | Purpose | Example |
+|---|---|---|
+| Module | Implements an individual action used by a task | `ansible.builtin.copy` |
+| Role | Reusable structure of tasks, defaults, variables, handlers, templates, and files | Local role `webserver` |
+| Collection | Distribution unit containing modules, roles, plugins, and related content | `community.docker` |
 
-Modern Standard  
-Collections. They use a Fully Qualified Collection Name (FQCN) formatted as `namespace.collection.item`.
+A collection is named `namespace.collection`. An item within it normally uses a fully qualified collection name (FQCN), such as `community.docker.docker_container`. `namespace.collection.webserver` below is a naming illustration, not a claim that this role exists.
 
-- **Namespace:** The organization/creator (e.g., `community`, `amazon`).
-- **Collection:** The specific tool bundle (e.g., `docker`, `aws`).
-- **Item:** The role or module being called.
-- **Example:** `community.docker.docker_container` (Module) or `middleware_automation.jcliff.nginx` (Role).
+Standalone roles remain supported and may be installed as `author.role_name`; they are not invalid merely because collections are also available.
 
-- Strict Execution Order Ansible guarantees a specific execution order at the play level. All roles completely finish before standard tasks begin.
-  1.  `pre_tasks:` (Setup/prerequisites)
-  2.  `roles:` (All play-level roles execute fully)
-  3.  `tasks:` (Standard modules execute here)
-  4.  `post_tasks:` (Verification/cleanup)
+```bash
+# Illustrative names: replace with actual content you intend to install.
+ansible-galaxy collection install namespace.collection
+ansible-galaxy role install author.role_name
+```
 
-## Craft import — Ansible — 2026-09-27
+### Role layout
+
+```text
+roles/webserver/
+├── tasks/main.yml
+├── defaults/main.yml
+├── vars/main.yml
+├── handlers/main.yml
+├── templates/
+├── files/
+└── meta/main.yml
+```
+
+Include only the directories needed. `defaults/main.yml` supplies easily overridden defaults; `vars/main.yml` has higher precedence. These are not interchangeable places for user configuration. See [Ansible roles](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html).
+
+## Three ways to use a role
+
+These are alternative plays. Each assumes an existing local `webserver` role and an inventory group named `webservers`. Replace `webserver` with an installed role FQCN when using collection content.
+
+### Play-level `roles`
+
+```yaml
+- name: Configure web servers
+  hosts: webservers
+  roles:
+    - role: webserver
+      vars:
+        webserver_port: 8080
+```
+
+### Dynamic `include_role`
+
+The role is included when execution reaches this task. Conditions and loops on the include control whether/how it is included; options intended for its child tasks may need `apply`.
+
+```yaml
+- name: Include a role at a chosen point
+  hosts: webservers
+  tasks:
+    - name: Run the webserver role
+      ansible.builtin.include_role:
+        name: webserver
+      vars:
+        webserver_port: 8080
+```
+
+See [`include_role`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/include_role_module.html).
+
+### Static `import_role`
+
+The role's tasks are expanded during playbook parsing and execute at this position in the task list. Conditions and tags on an import are applied to the imported tasks; imports and includes therefore behave differently.
+
+```yaml
+- name: Import a role at a chosen point
+  hosts: webservers
+  tasks:
+    - name: Import the webserver role
+      ansible.builtin.import_role:
+        name: webserver
+      vars:
+        webserver_port: 8080
+```
+
+See [`import_role`](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/import_role_module.html).
+
+## Play execution order
+
+The usual successful sequence is:
+
+1. Fact gathering, if enabled.
+2. `pre_tasks`, then their notified handlers.
+3. Play-level `roles`, with dependencies processed before dependent roles.
+4. `tasks`, including any roles imported/included there.
+5. Handlers notified by roles/tasks.
+6. `post_tasks`, then their notified handlers.
+
+Handlers can also run earlier with `meta: flush_handlers`. Conditions, tags, failures, and duplicate-role rules affect what actually runs. This is a play structure, not a guarantee that every host completes every role before any host starts ordinary tasks: `serial` batches and [execution strategy](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_strategies.html) matter. See [role execution order](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html#using-roles-at-the-play-level).
+
+## SSH and file transfer
+
+Ansible's connection plugin controls transport. For `ansible.builtin.ssh`, the default transfer method is `smart`: try SFTP, then SCP, then a piped transfer. It is more precise to say “SFTP is tried first” than “Ansible always uses SFTP.” SSH also executes remote commands; file transfer is only one part of the connection workflow.
+
+To select SFTP explicitly in `ansible.cfg`:
+
+```ini
+[ssh_connection]
+transfer_method = sftp
+```
+
+Legacy SCP can be selected with `transfer_method = scp`; the documented OpenSSH 9+ compatibility setting is `scp_extra_args = -O`. Use this only when the legacy protocol is actually required. See [SSH connection options](https://docs.ansible.com/ansible/latest/collections/ansible/builtin/ssh_connection.html).
+
+`ansible.posix.synchronize` wraps rsync for efficient directory/file synchronization. It belongs to the `ansible.posix` collection, not `ansible.builtin`, and requires rsync on the originating and receiving hosts. It normally originates from the controller, but delegation can change that. Transfers still depend on authentication, paths, and permissions; it is not simply an automatic “large-file mode.” See [`synchronize`](https://docs.ansible.com/ansible/latest/collections/ansible/posix/synchronize_module.html).
+
+## Source provenance
 
 <!-- Org properties: {"craft_id": "7089CF11-90D2-4774-81DB-147B28EFE7D4", "imported": "2026-09-27"} -->
 
-Source: [Ansible in Craft](craftdocs://open?spaceId=f0e27734-d8b8-47ce-be9d-9b35def0cb70&blockId=7089CF11-90D2-4774-81DB-147B28EFE7D4)
-
-### Architecture
-
-------------------------------------------------------------------------
-
-#### Collection
-
-- the default release and install package, modern "shipping container"
-
-- can contains multiple roles, modules, plugins and others
-
-- use Fully Qualified Collection Name
-
-  Namespace.Collection.Item
-
-- execution order
-
-  pre tasks → roles → tasks → post tasks
-
-``` text
-ansible-galaxy collection install namespace.collection
-```
-
-------------------------------------------------------------------------
-
-#### Role
-
-- A self-contained, reusable directory structure bundling tasks, variables, templates, and files
-- can be reused with release and install
-  - Legacy standard, upload to ansible galaxy with username.rolename
-
-``` text
-ansible-galaxy install username.rolename
-```
-
-- can be reused in two ways:
-  - called in the **role** section
-
-``` text
-- hosts: webservers
-  roles:
-    - role: namespace.collection.webserver
-      webserver_port: 8080
-```
-
-- can be triggered inside the **tasks** list as a module
-
-``` text
-tasks:
-  - name: Call a role mid-play               
-    ansible.builtin.include_role:
-      name: namespace.collection.webserver
-```
-
-#### Configuration priority
-
-- Lowest: /etc/ansible/ansible.cfg. default global configuration file.
-- low: ~/.ansible.cfg. per-user configuration in the home directory.
-- High: ansible.cfg current working directory , project folder.
-- Higher: \$ANSIBLE<sub>CONFIG</sub>. custom config file path.
-  - If set, Ansible ignores the default search paths and uses only this file.
-  - Example: ANSIBLE<sub>CONFIG</sub>=/work/newname.cfg ansible-playbook.
-- Highest: Environment variables
-  - override the values from the config file
-  - can be set with ANSIBLE<sub>HOST</sub>\_KEY<sub>CHECKING</sub>
-  - can passed by the terminal command
-  - can be inherited by system environment varible
-
-``` text
-ansible-config list
-ansible-config view
-ansible-config dump
-```
-
-------------------------------------------------------------------------
-
-#### Network connection
-
-- default use SFTP, but can be force to SCP
-- SCP need SSH connection do other stuffs, it is only for file transfer
-- synchronize module use rsync for large file transfer
+Original import: [Ansible in Craft](craftdocs://open?spaceId=f0e27734-d8b8-47ce-be9d-9b35def0cb70&blockId=7089CF11-90D2-4774-81DB-147B28EFE7D4), imported 2026-09-27. Duplicate imported content has been consolidated above. Reviewed against the linked documentation on 2026-09-30.

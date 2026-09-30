@@ -5,1208 +5,530 @@ org_id: "5731373C-A876-413D-8537-64AF487F05DD"
 
 # RL
 
+These notes cover reinforcement-learning foundations, language-model policy optimization, and a proposed shared-network experiment. Reviewed on 2026-09-30. Equations use discrete states/actions for readability; integrals replace sums in continuous settings.
+
+## Contents
+
+- [[#Markov Decision Process (MDP)]]
+- [[#Bellman Equation]]
+- [[#Dynamic Programming Iterations in RL]]
+- [[#Monte Carlo Methods in RL]]
+- [[#Temporal Difference]]
+- [[#Policy Gradient]]
+- [[#Actor-Critic]]
+- [[#RL for LLM]]
+- [[#GRPO]]
+- [[#MoE]]
+- [[#Multi-token training]]
+
 ## Markov Decision Process (MDP)
 
-- **State**: the set of states $S$
+At time $t$, the agent observes state $S_t$, chooses action $A_t$, and receives reward $R_{t+1}$ and next state $S_{t+1}$.
 
-  - at a time point, for all parts, how the world looks like.
-  - State space: at a time point, for all parts, how the world could look like
+| Symbol | Meaning |
+|---|---|
+| $\mathcal S$ | State space; $s$ is one state, not the entire set |
+| $\mathcal A(s)$ | Actions available at state $s$ |
+| $p(s',r\mid s,a)$ | Joint distribution of next state and reward |
+| $\pi(a\mid s)$ | Stochastic policy; a deterministic policy chooses one action |
+| $\rho_0$ | Initial-state distribution |
+| $\gamma$ | Discount factor |
 
-- **Action**: the set of actions $\mathcal{A}(s)$ is associated with state $s \in S$
+A state must contain enough information for the Markov assumption:
 
-  - at a time point, for each parts, what I do.
-  - Action space : at a time point, for each parts, what I could do
+$$
+p(S_{t+1},R_{t+1}\mid S_0,A_0,\ldots,S_t,A_t)
+=p(S_{t+1},R_{t+1}\mid S_t,A_t).
+$$
 
-- **Reward**: the set of rewards $\mathcal{R}(s, a)$
+The separate transition and reward probabilities are marginals of this joint distribution; they need not be independent. A partial observation is not necessarily a Markov state.
 
-- **Trajectory**
+A finite episode has $T$ actions and trajectory $(S_0,A_0,R_1,\ldots,S_{T-1},A_{T-1},R_T,S_T)$. Its return from time $t$ is
 
-  - episode, return: sum of discount return $\gamma$ in a episode(trajectory)
+$$
+G_t=\sum_{k=0}^{T-t-1}\gamma^kR_{t+k+1}.
+$$
 
-- **State transition probability**:
-
-  - state transition: at a time point, if I did one operation, what the world is changed to.
-  - at a time point, if I did one operation, How the world can be changed.
-  - At state $s$, taking action $a$, the probability to transit to state $s'$ is $p(s' \mid s, a)$
-
-- **Reward probability**: At state $s$, taking action $a$, the probability to get reward $r$ is $p(r \mid s, a)$
-
-- **Policy**
-
-  - deterministic & stochastic
-  - At state $s$, the probability to choose action $a$ is $\pi(a \mid s)$
-
-- **Markov property** Memoryless property:
-
-  $$
-  p(s_{t+1} \mid a_{t}, s_t, \ldots, a_0, s_0) = p(s_{t+1} \mid a_{t}, s_t)
-  $$
-
-  $$
-  p(r_{t+1} \mid a_{t}, s_t, \ldots, a_0, s_0) = p(r_{t+1} \mid a_{t}, s_t)
-  $$
+For continuing tasks, the sum may be infinite. Bounded rewards and $0\le\gamma<1$ ensure a finite discounted return. Undiscounted episodic problems need suitable termination/integrability assumptions.
 
 ## Bellman Equation
 
-- **Return** : summary of all discount return in one complete trajectory
+Values are expectations **conditioned on the starting state/action and subsequent policy**:
 
-- **State Value**: expectation of Return for all possible trajectories
+$$
+V^\pi(s)=\mathbb E_\pi[G_t\mid S_t=s],\qquad
+Q^\pi(s,a)=\mathbb E_\pi[G_t\mid S_t=s,A_t=a].
+$$
 
-  $$
-  V_{\pi}(s) = \sum_{a} \pi(a|s) \sum_{s', r} p(s', r | s, a) \left[ r + \gamma V_{\pi}(s') \right]
-  $$
+The expectation equations are
 
-  Relationship to action value:
+$$
+V^\pi(s)=\sum_a\pi(a\mid s)Q^\pi(s,a)
+=\sum_a\pi(a\mid s)\sum_{s',r}p(s',r\mid s,a)[r+\gamma V^\pi(s')],
+$$
 
-  $$
-  V_{\pi}(s) = \sum_{a \in \mathcal{A}} \pi(a|s) Q_{\pi}(s, a)
-  $$
+$$
+Q^\pi(s,a)=\sum_{s',r}p(s',r\mid s,a)
+\left[r+\gamma\sum_{a'}\pi(a'\mid s')Q^\pi(s',a')\right].
+$$
 
-- **Action Value**: expectation of Return for all possible trajectories after taking a specified action
+Set terminal-state values to zero. The optimality equations replace the next-action policy average with a maximum:
 
-  $$
-  Q_{\pi}(s, a) = \sum_{s', r} p(s', r | s, a) \left[ r + \gamma \sum_{a'} \pi(a'|s') Q_{\pi}(s', a') \right]
-  $$
+$$
+V^*(s)=\max_a\sum_{s',r}p(s',r\mid s,a)[r+\gamma V^*(s')],
+$$
 
-  Relationship to state value
-
-  $$
-  Q_{\pi}(s, a) = \sum_{s', r} p(s', r | s, a) \left[ r + \gamma V_{\pi}(s') \right]
-  $$
-
-- **Bellman Optimality Equation** is bellman equation with the best policy
+$$
+Q^*(s,a)=\sum_{s',r}p(s',r\mid s,a)[r+\gamma\max_{a'}Q^*(s',a')].
+$$
 
 ## Dynamic Programming Iterations in RL
 
-### Value Iteration
+Dynamic programming uses the transition/reward model. For a finite discounted MDP, the Bellman operators are contractions; this supports the usual convergence statements below.
 
-Value Iteration combines policy improvement and a single step of policy evaluation into one operation.
+### Value iteration
 
-- **Initialization:** Start with an arbitrary initial value for all states (e.g., $v_0 = 0$).
-- **Iteration:**
-  1.  **Implicit Policy Update:** For all states, apply all possible action (Q-table), look ahead to find the best action.
+Starting from a bounded $V_0$, repeatedly apply
 
-      $$
-      \pi_{k+1} = \arg\max_{\pi} \left( r_{\pi} + \gamma P_{\pi} v_k \right)
-      $$
+$$
+V_{k+1}(s)=\max_a\sum_{s',r}p(s',r\mid s,a)[r+\gamma V_k(s')].
+$$
 
-  2.  **Value Update:** Use that best action to update the state value immediately.
+The maximizer defines a greedy policy. A separate stored Q-table is optional: the action lookahead can be computed from $V_k$ and the model.
 
-      $$
-      v_{k+1} = r_{\pi_{k+1}} + \gamma P_{\pi_{k+1}} v_k
-      $$
+### Policy iteration
 
-### Policy Iteration
+1. **Evaluate a fixed policy:** solve $V^\pi=r_\pi+\gamma P_\pi V^\pi$. In finite problems this can be a linear solve, $(I-\gamma P_\pi)V^\pi=r_\pi$, or iterative updates to a chosen tolerance.
+2. **Improve:** choose an action maximizing $\sum_{s',r}p(s',r\mid s,a)[r+\gamma V^\pi(s')]$ in each state.
+3. Repeat until the policy is stable, using consistent tie-breaking.
 
-Policy Iteration separates the process into two distinct phases. Crucially, the **Policy Evaluation** phase is itself an iterative process that looks very similar to Value Iteration, but with a **fixed** policy.
+Theoretical convergence of evaluation does not require a computer to execute literally infinitely many steps. Practical stopping tolerances give approximate evaluation.
 
-#### Phase 1: Policy Evaluation (The Inner Loop)
+### Truncated / modified policy iteration
 
-This phase starts with a policy $\pi$ and calculates its value $v_{\pi}$.
-
-- **Input:** The current fixed policy $\pi_k$.
-- **Process:** We iterate to find the value by performing "Value Updates" repeatedly.
-  1.  Initialize a value estimate $v$ (e.g., $v=0$).
-
-  2.  Apply the Bellman Expectation Operator repeatedly (infinite steps):
-
-      $$
-      v_{i+1} = r_{\pi_k} + \gamma P_{\pi_k} v_i
-      $$
-
-  3.  **Stop** when $v$ converges (i.e., $i \to \infty$).
-- **Output:** The converged state-value function $v_{\pi_k}$.
-
-#### Phase 2: Policy Improvement (The Outer Loop)
-
-Once we know exactly how good the current policy $\pi_k$ is (from Phase 1), we make it greedy.
-
-- **Process:**
-
-  $$
-  \pi_{k+1} = \arg\max_{\pi} \left( r_{\pi} + \gamma P_{\pi} v_{\pi_k} \right)
-  $$
-
-### Truncated Policy Iteration
-
-The mathematical connection is defined by the depth of the evaluation step (the number of iterations $j$ in Phase 1):
-
-- **Value Iteration** is a special case of Truncated Policy Iteration where the evaluation depth is $j=1$.
-- **Policy Iteration** is the limit of Truncated Policy Iteration where the evaluation depth $j \to \infty$.
+Use a finite number of evaluation sweeps between greedy improvements. With the corresponding greedy-then-one-backup convention, one sweep yields value iteration; exact evaluation yields policy iteration. The ordering and initialization must match when making this equivalence.
 
 ## Monte Carlo Methods in RL
 
-Model-free, without knowing the model, we use the expectation of samples from MC to fine-tune Action value: $q_{\pi_{k}(s,a)} = E(G_{t}| S_{t}=s, A_{t}=a )$. Basically, the process works the same as Policy iteration (Policy evaluation and policy improvement), only the evaluation is with the sampling from MC.
+Monte Carlo (MC) estimates values from completed returns without a transition model. The original “MC Basic uses only the initial state” is a possible deliberately inefficient estimator, not a general definition of MC.
 
-### 1. MC Basic (The Theoretical Baseline)
+| Choice | Meaning |
+|---|---|
+| First-visit MC | Update from the first occurrence of each state or state-action pair in an episode |
+| Every-visit MC | Update from every occurrence |
+| Exploring starts | Give each relevant starting state-action pair nonzero probability |
+| Epsilon-soft control | Maintain action exploration while improving a policy |
 
-This is the simplest form, adapted directly from Policy Iteration logic but using sample returns instead of models.
+First-visit does **not** mean only the episode's initial step. Exploring starts is an exploration assumption, independent of first/every-visit estimation; it does not imply every-visit MC.
 
-- **Theory:**
-  - Operates in strict distinct steps: **Policy Evaluation** (wait for many episodes) $\rightarrow$ **Policy Improvement** (update policy).
-  - Uses the **Initial-Visit Strategy**: Only the start of an episode is used to update the value of the starting state-action pair $(s_0, a_0)$. Intermediate steps in the episode are ignored for updates.
-- **Limitation:**
-  - **Low Sample Efficiency**: Wastes data by ignoring subsequent state visits in an episode.
-  - **Impractical**: Requires collecting "sufficiently many episodes" for **every** state-action pair before making a single policy update.
+For sample averaging at the $n$th visit:
 
-### 2. MC Exploring Starts (The Efficient Simulator)
+$$
+Q(s,a)\leftarrow Q(s,a)+\frac1n[G_t-Q(s,a)].
+$$
 
-An extension designed to fix sample efficiency but introduces a strong dependency on environment control.
+Constant-step updates also exist. Setting the step size to one overwrites the estimate with the latest return; it is not the defining MC rule.
 
-- **Theory:**
-  - **Data Efficiency**: Uses the **Every-Visit Strategy** (or sub-episode decomposition). One long episode is broken down into multiple "sub-episodes" to update values for every state visited, not just the start.
-  - **Episode-by-Episode Update**: Updates the policy immediately after a single episode (Generalized Policy Iteration), rather than waiting for a batch.
-- **Limitation:**
-  - **The "Exploring Starts" Assumption**: It requires the environment to be able to start an episode at **any** random state-action pair $(s, a)$.
-  - **Real-world Friction**: This is often impossible in physical reality (e.g., you cannot initialize a robot in a specific "falling over" state instantly).
+For a finite action set with one chosen greedy action $a^*$:
 
-### 3. MC Epsilon-Greedy (The Practical Solution)
+$$
+\pi(a\mid s)=\frac{\epsilon}{|\mathcal A(s)|}+(1-\epsilon)\mathbf1[a=a^*].
+$$
 
-This method removes the unrealistic "Exploring Starts" assumption, making MC methods viable for real-world learning where you cannot control the starting state.
-
-#### Core Concept: Soft Policies
-
-Instead of forcing the environment to **start** randomly, we force the agent to **behave** randomly occasionally.
-
-- **Goal**: Ensure all state-action pairs are visited "sufficiently many times" without external resets.
-- **Mechanism**: Uses a **Soft Policy** ( $\epsilon$ -greedy), meaning there is always a non-zero probability of taking any action in any state.
-
-#### Exploration vs. Exploitation
-
-The algorithm balances these two conflicting goals via the parameter $\epsilon$ (epsilon).
-
-- Exploration ( The $\epsilon$ component)
-  - **Purpose**: To discover new strategies and ensure the agent does not get stuck in a suboptimal loop. By taking random actions, the agent eventually wanders into every possible state, fulfilling the coverage requirement that "Exploring Starts" used to handle.
-  - **Mechanism**: With probability $\epsilon$, the agent ignores its knowledge and chooses randomly.
-- Exploitation (The $1-\epsilon$ component)
-  - **Purpose**: To maximize rewards based on current knowledge. The agent selects the "Greedy" action (the one with the highest estimated value $q(s,a)$).
-  - **Mechanism**: With probability $1 - \epsilon$, the agent chooses the best known action.
-
-<!-- -->
-
-- **Continuous Learning**: Even if the agent always starts at the same spot (Start Line), the stochastic nature of the policy ($\epsilon$) ensures that over many episodes, it will eventually drift into unvisited states.
+Exploration cannot reach unreachable states. Coverage and convergence require assumptions about reachability, visitation, step sizes, and policy updates. A fixed positive $\epsilon$ maintains exploration but does not converge to a fully greedy policy; GLIE schedules aim for infinite exploration while becoming greedy in the limit.
 
 <a id="0DFD0B33-8109-4740-926E-75DA2CB5334C"></a>
 
 ## Temporal Difference
 
-**Core Concept** TD Learning is the solution(policy) to the Bellman Expectation Equation, formulated as a root-finding problem and solved using the Robbins-Monro stochastic approximation algorithm.
-
-### The Mathematical Driver
-
-- The Goal: Bellman Expectation Equation We seek $V_{\pi}(s)$ such that:
-
-  $$
-  V_{\pi}(s) = \mathbb{E}_{\pi} [ R_{t+1} + \gamma V_{\pi}(S_{t+1}) \mid S_t = s ]
-  $$
-
-- The Problem: Root Finding Define the objective function (Bellman Error) $J(V)$, where we want the root $J(V)=0$:
-
-  $$
-  J(V)(s) = \mathbb{E} [ R_{t+1} + \gamma V(S_{t+1}) ] - V(s) = 0
-  $$
-
-- The Solver: Robbins-Monro Algorithm Iteratively find root $\theta^*$ of $f(\theta)=0$ using noisy observations $\tilde{f}(\theta)$:
-
-  $$
-  \theta_{t+1} = \theta_t + \alpha_t \cdot \tilde{f}(\theta_t)
-  $$
-
-  - $\theta$ \> $\theta^*$ minus $\tilde{f}(\theta_t)$
-  - $\theta$ \< $\theta^*$ plus $\tilde{f}(\theta_t)$
-
-### The Derivation
-
-- The Noisy Observation (TD Error) Since we cannot compute the expectation $\mathbb{E}$, we take a single sample:
-  - **Observation:** $\tilde{J}(V_t) = (r_{t+1} + \gamma V_t(s_{t+1})) - V_t(s_t)$
-  - This is the **TD Error** ($\delta_t$).
-
-- The Sample Target The term $r_{t+1} + \gamma V_t(s_{t+1})$ acts as the "Label":
-  - **Reality:** $r_{t+1}$ (Ground truth, low variance).
-  - **Guess:** $\gamma V_t(s_{t+1})$ (Bootstrap estimate).
-  - **Function:** It acts as the target $y$ for $V(s_t)$, providing a better estimate than $V(s_t)$ alone because it includes real data.
-
-- The Solution (TD Update Rule) Substituting $\tilde{f}(\theta)$ into the Robbins-Monro update:
-
-  $$
-  V(s_t) \leftarrow V(s_t) + \alpha \delta_t
-  $$
-
-  $$
-  V(s_t) \leftarrow V(s_t) + \alpha \underbrace{[ (r_{t+1} + \gamma V(s_{t+1})) - V(s_t) ]}_{\text{TD Error}}
-  $$
-
-  $$
-  V(s_t) \leftarrow V(s_t) - \alpha [ V(s_t) - \underbrace{(r_{t+1} + \gamma V(s_{t+1}))}_{\text{Target}} ]
-  $$
-
-### Unified View of TD-series
-
-#### 1. The General Update Rule
-
-When we use Action value instead of policy for TD, all discussed algorithms can be expressed as a stochastic approximation update solving a Bellman equation. The unified update rule (Gradient Descent form) is:
+TD prediction learns a **value function**, not directly a policy. It bootstraps from a current estimate:
 
 $$
-q_{t+1}(s_t, a_t) = q_t(s_t, a_t) - \alpha_t(s_t, a_t) [ q_t(s_t, a_t) - \bar{q}_t ]
+\delta_t=R_{t+1}+\gamma V(S_{t+1})-V(S_t),\qquad
+V(S_t)\leftarrow V(S_t)+\alpha_t\delta_t.
 $$
 
-- $q_t(s_t, a_t)$: Current Estimate
-- $\alpha_t$: Learning rate (Step size)
-- $\bar{q}_t$: The **Target** (The noisy sample derived from environment interaction)
-- The term $[q_t - \bar{q}_t]$ represents the error to minimize.
+This is stochastic approximation to the Bellman fixed point. Define the residual $(T_\pi V)(s)-V(s)$ with the expectation conditioned on $S_t=s$ and actions following $\pi$. Convergence is not guaranteed for an arbitrary root-finding problem just because an update has a plus sign: the expected update must be stable and sampling/step-size assumptions must hold.
 
-#### 2. Algorithm Specifics
+Common tabular conditions include adequate visitation and per-state step sizes satisfying $\sum_t\alpha_t=\infty$, $\sum_t\alpha_t^2<\infty$. A reward sample can itself be noisy; TD targets are not always less noisy or more accurate on each individual update than the existing estimate.
 
-- Sarsa:
-  - **Target Expression ($\bar{q}_t$):**
+### Unified action-value update
 
-    $$
-    \bar{q}_t = r_{t+1} + \gamma q_t(s_{t+1}, a_{t+1})
-    $$
+$$
+Q(S_t,A_t)\leftarrow Q(S_t,A_t)+\alpha_t[y_t-Q(S_t,A_t)].
+$$
 
-  - **Equation Aimed to Solve:** **Bellman Expectation Equation (BE) for \$q<sub>π</sub>\$**:
+| Algorithm | Target $y_t$ | Qualification |
+|---|---|---|
+| Sarsa | $R_{t+1}+\gamma Q(S_{t+1},A_{t+1})$ | On-policy when the next action follows the behavior/target policy |
+| Q-learning | $R_{t+1}+\gamma\max_aQ(S_{t+1},a)$ | Off-policy optimality backup |
+| Expected Sarsa | $R_{t+1}+\gamma\sum_a\pi(a\mid S_{t+1})Q(S_{t+1},a)$ | Can be on- or off-policy, depending on the policy used in the expectation |
+| $n$-step Sarsa | $\sum_{k=0}^{n-1}\gamma^kR_{t+k+1}+\gamma^nQ(S_{t+n},A_{t+n})$ | Truncate at termination and omit terminal bootstrap |
+| Monte Carlo | $G_t$ | No bootstrap; wait for the completed return |
 
-    $$
-    q_{\pi}(s, a) = \mathbb{E} [R_{t+1} + \gamma q_{\pi}(S_{t+1}, A_{t+1}) \mid S_t = s, A_t = a]
-    $$
-
-  - **Note:** This is an on-policy method using the action $a_{t+1}$ actually taken by the current policy.
-- Q-learning
-  - **Target Expression ($\bar{q}_t$):**
-
-    $$
-    \bar{q}_t = r_{t+1} + \gamma \max_{a} q_t(s_{t+1}, a)
-    $$
-
-  - **Equation Aimed to Solve:** **Bellman Optimality Equation (BOE) for \$q<sub>\*</sub>\$**:
-
-    $$
-    q_{*}(s, a) = \mathbb{E} [R_{t+1} + \gamma \max_{a} q_{*}(S_{t+1}, a) \mid S_t = s, A_t = a]
-    $$
-
-  - **Note:** This is an off-policy method because it updates towards the best possible action ($\max$), regardless of the policy actually followed.
-- Expected Sarsa
-  - **Target Expression ($\bar{q}_t$):**
-
-    $$
-    \bar{q}_t = r_{t+1} + \gamma \sum_{a} \pi_t(a|s_{t+1})q_t(s_{t+1}, a)
-    $$
-
-  - **Equation Aimed to Solve:** **Bellman Expectation Equation (BE) for \$q<sub>π</sub>\$**:
-
-    $$
-    q_{\pi}(s, a) = \mathbb{E} [R_{t+1} + \gamma \mathbb{E}_{A_{t+1}}[q_{\pi}(S_{t+1}, A_{t+1})] \mid S_t = s, A_t = a]
-    $$
-
-  - **Note:** It reduces variance by taking the expectation over all possible next actions rather than just sampling one.
-- N-step Sarsa
-  - **Target Expression ($\bar{q}_t$):**
-
-    $$
-    \bar{q}_t = r_{t+1} + \gamma r_{t+2} + \dots + \gamma^{n-1} r_{t+n} + \gamma^n q_t(s_{t+n}, a_{t+n})
-    $$
-
-  - **Equation Aimed to Solve:** **Bellman Expectation Equation (BE) for \$q<sub>π</sub>\$**:
-
-    $$
-    q_{\pi}(s, a) = \mathbb{E} [R_{t+1} + \gamma R_{t+2} + \dots + \gamma^{n-1} R_{t+n} + \gamma^n q_{\pi}(S_{t+n}, A_{t+n}) \mid S_t = s, A_t = a]
-    $$
-
-  - **Note:** It balances bias and variance by looking $n$ steps ahead before bootstrapping.
-- Monte Carlo (MC)
-  - **Target Expression ($\bar{q}_t$):**
-
-    $$
-    \bar{q}_t = r_{t+1} + \gamma r_{t+2} + \dots \text{ (Full Return } G_t)
-    $$
-
-  - **Equation Aimed to Solve:** **Bellman Expectation Equation (BE) for \$q<sub>π</sub>\$**:
-
-    $$
-    q_{\pi}(s, a) = \mathbb{E} [R_{t+1} + \gamma R_{t+2} + \dots \mid S_t = s, A_t = a]
-    $$
-
-  - **Note:** Can be viewed as the unified expression where $\alpha_t(s_t, a_t) = 1$, making $q_{t+1} = \bar{q}_t$ (direct assignment of the return).
+Expected Sarsa removes next-action sampling variance conditional on the next state; it does not remove transition/reward uncertainty. These updates resemble regression against a target, but bootstrapped function-approximation updates are generally **semi-gradients**, not full gradients of the mean squared Bellman residual.
 
 ### Deep Q-learning
 
-- Deep Q-learning replaces the tabular $q(s,a)$ with a parameterized neural network $\hat{q}(s, a, w)$.
+DQN replaces a table with $Q_w(s,a)$. For a replay-buffer sample, using a separate target network $w^-$:
 
-- We want the neural network to satisfy the **Bellman Optimality Equation**:
+$$
+y=R+\gamma(1-d)\max_{a'}Q_{w^-}(S',a'),\qquad
+L(w)=\mathbb E[(Q_w(S,A)-\operatorname{stopgrad}(y))^2].
+$$
 
-  $$
-  q_*(s, a) = \mathbb{E} [R_{t+1} + \gamma \max_{a'} q_*(S_{t+1}, a') \mid S_t=s, A_t=a]
-  $$
+Here $d=1$ means true termination. A time-limit truncation is not automatically terminal; bootstrap from its actual final observation when appropriate.
 
-- It aims to minimize the loss function $J(w)$:
-
-  $$
-  J(w) = \mathbb{E} \left[ \left( \underbrace{R + \gamma \max_{a' \in \mathcal{A}(S')} \hat{q}(S', a', w)}_{\text{Target (Bellman Optimality)}} - \underbrace{\hat{q}(S, A, w)}_{\text{Prediction}} \right)^2 \right]
-  $$
-
-  where the term inside the squared brackets is the **TD Error** (specifically for Q-Learning).
-
-  $$
-  \delta = (R + \gamma \max \hat{q}(S', a', w)) - \hat{q}(S, A, w)
-  $$
-
-  . In order to minimize the distance (error) between the **Prediction** and the **Target**, the network $\hat{q}$ converges towards the optimal value function $q_*$.
-
-- Algorithm
-
-  - **Sample:** Uniformly draw a mini-batch of samples from $\mathcal{B}$.
-
-  - **Calculate Targets:** For each sample $(s, a, r, s')$ in the mini-batch, calculate the target value $y_T$:
-
-    $$
-    y_T = r + \gamma \max_{a \in \mathcal{A}(s')} \hat{q}(s', a, w_T)
-    $$
-
-    - Where $w_T$ is the parameter of the **target network**.
-
-  - **Update Main Network:** Update the main network parameter $w$ to minimize the loss:
-
-    $$
-    Loss = (y_T - \hat{q}(s, a, w))^2
-    $$
-
-    - This update uses the mini-batch data $\{(s, a, y_T)\}$.
-
-  - **Update Target Network:** Set $w_T = w$ every $C$ iterations.
+Sample minibatches from replay, update the online network, and periodically copy online weights to the target network. Huber loss is also commonly used. Replay and target networks improve stability; they do not establish general convergence to $Q^*$ with nonlinear approximation. See the [DQN paper](https://www.nature.com/articles/nature14236).
 
 <a id="4711B696-A708-4093-A33A-5CEF4EDA902C"></a>
 
 ## Policy Gradient
 
-### Metrics
+### Discounted and average-reward objectives
 
-- $\bar{v}_\pi$ (Discounted Average Value)
-
-  $$
-  \sum_{s \in S} d(s)\, v_\pi(s)
-  $$
-
-  $$
-  \mathbb{E}_{S \sim d}[v_\pi(S)]
-  $$
-
-  $$
-  \mathbb{E}\left[\sum_{t=0}^{\infty} \gamma^{t} R_{t+1}\right]
-  $$
-
-- $\bar{r}_\pi$ (Average Reward Objective)
-
-  $$
-  \sum_{s \in S} d_\pi(s)\, r_\pi(s)
-  $$
-
-  $$
-  \mathbb{E}_{S \sim d_\pi}[r_\pi(S)]
-  $$
-
-  $$
-  \lim_{n \to \infty} \frac{1}{n} \mathbb{E}\left[\sum_{t=0}^{n-1} R_{t+1}\right]
-  $$
-
-### General objective function for metrics
-
-The gradient of the objective function $J(\theta)$ is given by the Policy Gradient Theorem:
+For a fixed starting distribution $\rho_0$:
 
 $$
-\nabla_\theta J(\theta) = \sum_{s \in S} \eta(s) \sum_{a \in A} \nabla_\theta \pi(a \mid s, \theta)\, q_\pi(s, a)
+J(\theta)=\mathbb E_{S_0\sim\rho_0}[V^{\pi_\theta}(S_0)]
+=\mathbb E_{\pi_\theta}\left[\sum_{t\ge0}\gamma^tR_{t+1}\right].
 $$
 
-where:
-
-- $\eta(s)$ is the state distribution (discounted or stationary depending on metric)
-- $\nabla_\theta \pi(a \mid s, \theta)$ denotes the gradient of the policy $\pi$ with respect to the parameters $\theta$,
-- $q_\pi(s, a)$ is the action-value function.
-- Note: The theorem proves equality, but in practice, ignoring the gradient of the state distribution leads to an approximation often called the "proportional" gradient.
-
-Moreover, as an expectation:
+This is a starting-distribution-weighted discounted value, not necessarily a stationary average reward. Under suitable ergodicity assumptions, the separate average-reward objective is
 
 $$
-\nabla_\theta J(\theta) = \mathbb{E}_{S \sim \eta,\; A \sim \pi(S,\theta)} \left[ \nabla_\theta \ln \pi(A \mid S, \theta)\, q_\pi(S, A) \right].
+\bar r_\pi=\sum_s d_\pi(s)r_\pi(s)
+=\lim_{T\to\infty}\frac1T\mathbb E_\pi\left[\sum_{t=0}^{T-1}R_{t+1}\right].
 $$
 
-### Policy parameters update
+Average-reward policy-gradient results use differential value functions and should not silently substitute discounted $Q^\pi$.
+
+### Occupancy measure and exact gradient
+
+Let the **unnormalized** discounted occupancy be
 
 $$
-\theta_{t+1} = \theta_t + \alpha \nabla_\theta J(\theta_t)
+\eta_\pi(s)=\sum_{t\ge0}\gamma^t\Pr_\pi(S_t=s\mid S_0\sim\rho_0).
 $$
 
-Using the expectation form of the policy gradient, this becomes:
+Then
 
 $$
-\theta_{t+1} = \theta_t + \alpha \mathbb{E} [ \nabla_\theta \ln \pi(A \mid S, \theta_{t})\, q_{\pi}(S, A) ]
+\nabla_\theta J=\sum_s\eta_\pi(s)\sum_a\nabla_\theta\pi_\theta(a\mid s)Q^\pi(s,a).
 $$
 
-We do not have $q_{\pi}(S, A)$, so use $\hat{q}(S_t, A_t)$ from sampling.
+For $d_\pi^\gamma=(1-\gamma)\eta_\pi$ and $\gamma<1$:
 
 $$
-\theta_{t+1} = \theta_t + \alpha \nabla_\theta \ln \pi(A_t \mid S_t, \theta_t)\, \hat{q}(S_t, A_t)
+\nabla_\theta J=\frac1{1-\gamma}\mathbb E_{S\sim d_\pi^\gamma,A\sim\pi}
+[\nabla_\theta\log\pi_\theta(A\mid S)Q^\pi(S,A)].
 $$
 
-- Sampling from MC: REINFORCE
-- Sampling from TD: Actor-Critic
+The policy-gradient theorem accounts for occupancy dependence; it does not become approximate merely because an explicit $\nabla d_\pi$ term disappears. The constant changes if a normalized objective is used. Sampling states with another weighting can change the objective/estimator.
 
-### Theory
+### REINFORCE and the log-derivative trick
 
-$$
-\theta_{t+1} = \theta_t + \alpha \nabla_{\theta} \ln \pi(a_t \mid s_t, \theta_t) q_t(s_t, a_t)
-$$
-
-Because of the log-derivative trick:
+For $\pi_\theta(a\mid s)>0$,
 
 $$
-\nabla_{\theta} \ln \pi(a_t \mid s_t, \theta_t) = \frac{\nabla_{\theta} \pi(a_t \mid s_t, \theta_t)}{\pi(a_t \mid s_t, \theta_t)}
+\nabla\log\pi_\theta(a\mid s)=\frac{\nabla\pi_\theta(a\mid s)}{\pi_\theta(a\mid s)}.
 $$
 
-We have:
+A complete-episode estimator for the discounted starting-state objective is
 
 $$
-\theta_{t+1} = \theta_t + \alpha \frac{\nabla_{\theta} \pi(a_t \mid s_t, \theta_t)}{\pi(a_t \mid s_t, \theta_t)} q_t(s_t, a_t)
+\hat g=\sum_{t=0}^{T-1}\gamma^t\nabla_\theta\log\pi_\theta(A_t\mid S_t)[G_t-b(S_t)],
+\qquad \theta\leftarrow\theta+\alpha\hat g.
 $$
 
-So, defining $\beta_t = \frac{q_t(s_t, a_t)}{\pi(a_t \mid s_t, \theta_t)}$:
+Compute all terms at the rollout policy parameters before the update. A state-only baseline leaves the expected score-function gradient unchanged; suitable baselines can reduce variance, but an arbitrary baseline need not do so. Treat the baseline/advantage as fixed in the actor update.
 
-$$
-\theta_{t+1} = \theta_t + \alpha \beta_t \nabla_{\theta} \pi(a_t \mid s_t, \theta_t)
-$$
-
-- If $\beta_t \ge 0 \implies$ Move in direction of gradient:
-  - \-$\implies \pi(a_t | s_t, \theta_{t+1}) \ge \pi(a_t | s_t, \theta_t)$
-  - Enhancement
-  - Reinforce good actions
-- If $\beta_t < 0 \implies$ Move opposite to gradient :
-  - $\implies \pi(a_t | s_t, \theta_{t+1}) < \pi(a_t | s_t, \theta_t)$
-  - Decrease
-  - Suppress bad actions
-
-### REINFORCE Algorithm
-
-Monte Carlo Policy Gradient
-
-- Initialize: $\theta$, $\gamma \in (0,1)$, $\alpha > 0$
-- Loop for each episode:
-  - Generate episode $\{s_0, a_0, r_1, \dots, s_{T-1}, a_{T-1}, r_T\}$ following policy $\pi(\cdot|\cdot, \theta_k)$
-  - For $t = 0$ to $T-1$:
-    - $G_t \leftarrow \sum_{k=t+1}^{T} \gamma^{k-t-1} r_k$ (Calculate return)
-    - $\theta_{t} \leftarrow \theta_{t} + \alpha \gamma^t G_t \nabla_{\theta} \ln \pi(a_t | s_t, \theta_{k})$
-
-  <!-- -->
-
-  - $\theta_{k} \leftarrow \theta_{t}$
+Positive advantage locally encourages a sampled action; negative advantage discourages it. This is not a guarantee about finite steps, overall reward improvement, or probabilities at other states under shared parameters.
 
 <a id="AC79E6FC-992B-47AE-B277-665899FAD593"></a>
 
 ## Actor-Critic
 
-### Q-Actor-Critic (QAC)
-
-#### Background
-
-Derived from the Policy Gradient theorem, QAC replaces the Monte Carlo (MC) return with a **Temporal Difference (TD)** value function approximation. The policy parameters are updated using the gradient of the log-probability scaled by the action-value function:
+The **actor** is the policy; the **critic** estimates value. A Q-critic may use a Sarsa-style semi-gradient update:
 
 $$
-\theta_{t+1} = \theta_t + \alpha \nabla_{\theta} \ln \pi(a_t \mid s_t, \theta_t) q_t(s_t, a_t)
+\delta_t^Q=R_{t+1}+\gamma Q_w(S_{t+1},A_{t+1})-Q_w(S_t,A_t),
+\qquad w\leftarrow w+\alpha_w\delta_t^Q\nabla_wQ_w(S_t,A_t).
 $$
 
-#### Initialization
-
-- **Policy Function:** $\pi(a|s, \theta_0)$ with initial parameters $\theta_0$.
-- **Value Function:** $q(s, a, w_0)$ with initial parameters $w_0$.
-- **Learning Rates:** $\alpha_w, \alpha_{\theta} > 0$.
-- **Goal:** Maximize the expected return $J(\theta)$.
-
-#### Loop (for each time step $t$ in episode):
-
-1.  **Generate Action:** Sample $a_t \sim \pi(a|s_t, \theta_t)$.
-
-2.  **Observe Reward:** Get $r_{t+1}$ and next state $s_{t+1}$.
-
-3.  **Select Next Action:** Sample $a_{t+1} \sim \pi(a|s_{t+1}, \theta_t)$.
-
-4.  **Actor (Policy Update):** Update the policy parameters in the direction of higher rewards:
-
-    $$
-    \theta_{t+1} = \theta_t + \alpha_{\theta} \nabla_{\theta} \ln \pi(a_t | s_t, \theta_t) q(s_t, a_t, w_t)
-    $$
-
-5.  **Critic (Value Update):** Update the action-value parameters using the semi-gradient TD error:
-
-    $$
-    w_{t+1} = w_t + \alpha_w \left[ r_{t+1} + \gamma q(s_{t+1}, a_{t+1}, w_t) - q(s_t, a_t, w_t) \right] \nabla_w q(s_t, a_t, w_t)
-    $$
-
-### Advantage Actor-Critic
-
-#### Add baseline
-
-To improve the stability of the Policy Gradient, we introduce a **baseline** to the update function. Subtracting a state-value function $v(s)$ from the return reduces variance without introducing bias. The standard gradient update is modified by subtracting the baseline $v_t(s_t)$:
+For a state-value critic, define
 
 $$
-\theta_{t+1} = \theta_t + \alpha \nabla_{\theta} \ln \pi(a_t \mid s_t, \theta_t) [q_t(s_t, a_t) - v_t(s_t)]
+A^\pi(s,a)=Q^\pi(s,a)-V^\pi(s),\qquad
+\delta_t=R_{t+1}+\gamma V_w(S_{t+1})-V_w(S_t).
 $$
 
-#### The Advantage Function ($\delta_t$)
+$\delta_t$ is a **sample advantage estimate**, not the definition of advantage. With the true $V^\pi$, its conditional expectation given $(s,a)$ equals $A^\pi(s,a)$. An approximate critic introduces estimation error.
 
-We define the **Advantage Function** as the difference between the action-value and the state-value. However, since we often do not know $q_t$ explicitly, we approximate it using the **TD Error** $\delta_t$:
+A basic actor update is proportional to $\delta_t\nabla_\theta\log\pi_\theta(A_t\mid S_t)$, while the critic uses $w\leftarrow w+\alpha_w\delta_t\nabla_wV_w(S_t)$. Include the discounted time/occupancy weighting required by the chosen objective. Terminal bootstraps are zero.
 
-$$
-\delta_t(s_t, a_t) = q_t(s_t, a_t) - v_t(s_t) \approx r_{t+1} + \gamma v_t(s_{t+1}) - v_t(s_t)
-$$
+### Off-policy actor-critic
 
-Substituting this back into our update rule gives us a more robust update:
+For behavior policy $\mu$, the action ratio $\rho_t=\pi_\theta(A_t\mid S_t)/\mu(A_t\mid S_t)$ can correct the **conditional action distribution** if behavior covers target-policy support. It does not by itself correct a mismatch between behavior and target **state distributions**. An unbiased target-objective gradient may require trajectory/state-distribution corrections or a different objective; off-policy critic learning also needs a suitable algorithm.
 
-$$
-\theta_{t+1} = \theta_t + \alpha \nabla_{\theta} \ln \pi(a_t \mid s_t, \theta_t) \delta_t(s_t, a_t)
-$$
+### Shared or separate networks
 
-**Why use the Advantage Function?** The advantage $\delta_t$ effectively measures how much better an action $a_t$ was compared to the "average" value of the state. This helps balance **exploration and exploitation** more effectively than raw returns, as the agent explicitly learns which actions outperform the expected baseline.
-
-#### Algorithm
-
-- **Policy Function (Actor):** $\pi(a|s, \theta_0)$ with initial parameters $\theta_0$.
-- **Value Function (Critic):** $v(s, w_0)$ with initial parameters $w_0$.
-- **Learning Rates:** $\alpha_w, \alpha_{\theta} > 0$.
-- **Goal:** Learn an optimal policy to maximize expected return $J(\theta)$.
-
-At time step $t$ in each episode:
-
-1.  **Generate Action & Observe:** Generate $a_t$ following $\pi(a|s_t, \theta_t)$, then observe reward $r_{t+1}$ and next state $s_{t+1}$.
-
-2.  **Calculate Advantage (TD Error):** Compute the TD error using the Critic's current value estimates:
-
-    $$
-    \delta_t = r_{t+1} + \gamma v(s_{t+1}, w_t) - v(s_t, w_t)
-    $$
-
-3.  **Actor Update (Policy):** Update the policy parameters to encourage actions with high advantage:
-
-    $$
-    \theta_{t+1} = \theta_t + \alpha_{\theta} \delta_t \nabla_{\theta} \ln \pi(a_t | s_t, \theta_t)
-    $$
-
-4.  **Critic Update (Value):** Update the value function parameters to minimize the TD error:
-
-    $$
-    w_{t+1} = w_t + \alpha_w \delta_t \nabla_w v(s_t, w_t)
-    $$
-
-### Off-Policy Actor-Critic
-
-We use a behavior policy $\beta$ to generate experience samples. To estimate the gradient of the target policy $\pi$, we must use **Importance Sampling**.
-
-#### The Objective Gradient
-
-$$
-\nabla_{\theta} J(\theta) = \mathbb{E}_{S \sim \rho, A \sim \beta} \left[ \frac{\pi(A|S, \theta)}{\beta(A|S)} \nabla_{\theta} \ln \pi(A|S, \theta) q_{\pi}(S, A) \right]
-$$
-
-#### The Update Rule
-
-The update is similar to A2C but scaled by the importance sampling ratio $\rho_t$:
-
-$$
-\theta_{t+1} = \theta_t + \alpha \underbrace{ \frac{\pi(a_t|s_t, \theta_t)}{\beta(a_t|s_t)} }_{\text{Importance Weight } \rho_t} \delta_t(s_t, a_t) \nabla_{\theta} \ln \pi(a_t \mid s_t, \theta_t)
-$$
-
-Because of the log-derivative trick:
-
-$$
-\theta_{t+1} = \theta_t + \alpha \frac{\delta_t(s_t, a_t)}{\beta(a_{t}|s_{t})} \nabla_{\theta} \pi(a_t \mid s_t, \theta_t)
-$$
-
-Algorithm is similar only with difference of factor $\beta(a_{t}|s_{t})$
+Actor and critic can share a backbone or use separate networks. Shared parameters can cause gradient interference, but catastrophic forgetting is not inevitable. Separate models cost more memory; shared models can still use different head learning rates, loss weights, or alternating updates. [Phasic Policy Gradient](https://arxiv.org/abs/2009.04416) is one approach to separating phases of policy and value training, not a proof that sharing always fails.
 
 <a id="7D209C6C-FBAD-41BA-846C-FD8EBA22EE1A"></a>
 
 ## RL for LLM
 
-### Objective function to maximize the Reward
+### Tokens as actions
 
-#### Start from MDP
+For prompt $x$ and response tokens $y_0,\ldots,y_{T-1}$, state $s_t=(x,y_{<t})$, action $a_t=y_t$, and the next state appends that token. Termination may be EOS; an imposed generation limit needs an explicit terminal/truncation convention.
 
-We write the probability of a trajectory with MDP for $\tau = (s_0, a_0, \dots, s_T, a_T)$ :
-
-- $\tau$: Trajectory
-- $\pi_{\theta}$: Policy parameterized by $\theta$
-- $P(s_1)$: Probability of the initial state
-- $\pi_{\theta}(a_t | s_t)$: Probability of taking action $a_t$ in state $s_t$ (The Policy)
-- $P(s_{t+1} | s_t, a_t)$: Probability of transitioning to $s_{t+1}$ given $s_t$ and $a_t$ (The Transition Function/Model)
-
-Taking the gradient of the log-probability:
+With environment dynamics independent of $\theta$:
 
 $$
-\nabla_\theta \log P(\tau|\pi_{\theta}) = \nabla_\theta \log \rho_0(s_0) + \sum_{t=0}^{T} \left( \nabla_\theta \log P(s_{t+1}|s_t, a_t) + \nabla_\theta \log \pi_\theta(a_t|s_t) \right)
-$$
-
-Since the initial state distribution $\rho_0$ and the environment dynamics $P(s_{t+1}|s_t, a_t)$ do not depend on the policy parameters $\theta$, their gradients are zero:
-
-$$
-\nabla_\theta \log P(\tau|\theta) = \sum_{t=0}^{T} \nabla_\theta \log \pi_\theta(a_t|s_t)
-$$
-
-#### The Policy Gradient Theorem
-
-We aim to maximize the objective $J(\pi_\theta) = \mathbb{E}_{\tau \sim \pi_\theta} [R(\tau)]$.
-
-#### Final Merged Expression for derivative of objective function
-
-$$
-\nabla_\theta J(\pi_\theta) = \mathbb{E}_{\tau \sim \pi_\theta} \left[ \left( \sum_{t=0}^{T} \nabla_\theta \log \pi_\theta(a_t|s_t) \right) R(\tau) \right]
-$$
-
-#### Advantage function $A_{t}$
-
-From the above function, we introduce a baseline for $R{\tau}$ for reducing the variance. A great option is the current value $V(\tau)$. So we have the advantage function for objective function derivative: A = Q - V.
-
-- Monte Carlo: using G to estimate Q: A = G - V
-- Temporal Difference: using $Q=r+ \gamma V(s_{t+1}​)$, so $A = \delta_t^{V} = Q-V = r_t + \gamma V(s_{t+1}) - V(s_t)$
-- GAE: MC covers all the steps, and TD only sees one step, so GAE uses l steps for the general case $A_t^{GAE} = \sum_{l=0}^{\infty} (\gamma \lambda )^l \delta_{t+l}^V$
-
-#### Value model Loss function
-
-use MSE, $(V-Q)^2$, where V is the output of value model and Q is the expected value of current step, we use Q = A + V to share the advantage calculation from above.
-
-The value function (critic) is trained by minimizing the mean squared error between the predicted value and the estimated return:
-
-$$
-\mathcal{L}_{\text{value}} = \mathbb{E}_{t} \left[ \left( V_\psi(s_t) - ( A_t + V_\psi(s_t) ) \right)^2 \right]
-$$
-
-### Vanilla Policy Gradient (VPG / REINFORCE)
-
-$$
-g = \mathbb{E}_{\tau \sim \pi_\theta} \left[ \sum_{t=0}^{T} \nabla_\theta \log \pi_\theta(a_t|s_t) \hat{A}_t \right]
-$$
-
-- **Replace**: Instead of using total Reward, we use Advantage function.
-- **Advantage \$*Â*\_t\$**: Often replaced by the return $G_t$ or $Q(s,a) - V(s)$ to reduce variance.
-- **Problem**: High variance and extremely sensitive to step size. One "bad" update can collapse the policy's performance.
-
-### Trust Region Policy Optimization (TRPO)
-
-TRPO solves the stability issue by ensuring the new policy doesn't move too far from the old policy, using KL Divergence as a constraint.
-
-$$
-\max_\theta \mathbb{E}_{t} \left[ \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)} \hat{A}_t \right]
+P_\theta(\tau)=\rho_0(s_0)\prod_{t=0}^{T-1}\pi_\theta(a_t\mid s_t)p(s_{t+1}\mid s_t,a_t),
 $$
 
 $$
-\text{subject to } \mathbb{E}_{t} [KL(\pi_{\theta_{old}}(\cdot|s_t) || \pi_\theta(\cdot|s_t))] \leq \delta
+\nabla_\theta\log P_\theta(\tau)=\sum_{t=0}^{T-1}\nabla_\theta\log\pi_\theta(a_t\mid s_t).
 $$
 
-- **Replace**: we use the ratio from important exampling of current to old policy
-- **Key Idea**: It defines a "Trust Region" by KL divergence to keep the update in line
+Thus $\nabla_\theta\mathbb E[R(\tau)]=\mathbb E[R(\tau)\nabla_\theta\log P_\theta(\tau)]$ for a parameter-independent trajectory reward. If a reward term explicitly depends on $\theta$, its derivative needs separate treatment. For finite language-model responses, $\gamma=1$ is a common convention, not a universal rule.
 
-### Proximal Policy Optimization (PPO)
+### GAE and return targets
 
-PPO is the industry standard for LLM fine-tuning (RLHF). It mimics TRPO's stability but uses a much simpler "clipped" objective function.
-
-$$
-L^{CLIP}(\theta) = \mathbb{E}_t \left[ \min(r_t(\theta)\hat{A}_t, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon)\hat{A}_t) \right]
-$$
-
-Where:
-
-- **Probability Ratio**: $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}$
-- **Epsilon \$ϵ\$**: Usually set to 0.1 or 0.2.
-
-The clipped PPO policy loss with Generalized Advantage Estimation (GAE) is defined as:
+For $n$ steps before termination, with terminal $V=0$:
 
 $$
-\mathcal{L}_{\text{policy}} = - \mathbb{E}_{t} \Bigg[ \min \Bigg( r_t(\theta) \sum_{l=0}^{T-t} (\gamma \lambda)^l \delta_{t+l}, \; \operatorname{clip} \big( r_t(\theta), 1 - \epsilon, 1 + \epsilon \big) \sum_{l=0}^{T-t} (\gamma \lambda)^l \delta_{t+l} \Bigg) \Bigg]
+\hat A_t^{(n)}=\sum_{k=0}^{n-1}\gamma^k r_{t+k+1}+\gamma^nV_{\rm old}(s_{t+n})-V_{\rm old}(s_t)
+=\sum_{k=0}^{n-1}\gamma^k\delta_{t+k}.
 $$
 
-### Training
+The intermediate terms are **rewards**, not a sum of successive value estimates. For a rollout of length $T$:
 
-#### Using sepreate network
+$$
+\hat A_t^{\rm GAE}=\sum_{l=0}^{T-t-1}(\gamma\lambda)^l\delta_{t+l},
+\qquad \hat G_t=\hat A_t^{\rm GAE}+V_{\rm old}(s_t).
+$$
 
-Unlike traditional RL (e.g., Atari) where state representation is efficiently shared, LLM-based RL often requires decoupling the Actor and Critic due to **Negative Transfer** and **Optimization Divergence**.
+Use the appropriate final bootstrap at a truncation. The infinite weighted-$n$-step expression uses weights $(1-\lambda)\lambda^{n-1}$; a finite mixture needs the final residual weight, not simply a truncated geometric series. See [GAE](https://arxiv.org/html/1506.02438v6).
 
-1.  1\. Negative Transfer (Objective Interference)
+Critic regression uses a frozen target:
 
-    The Actor and Critic optimize fundamentally conflicting objectives, leading to **Catastrophic Forgetting** in shared architectures.
+$$
+L_V(\psi)=\mathbb E_t[(V_\psi(s_t)-\operatorname{stopgrad}(\hat G_t))^2].
+$$
 
-    - **Gradient Wash-Out:** The Critic's gradients can "wash out" the delicate weights required for language generation.
-    - **Manifold Collapse:** When the model maximizes reward aggressively, it loses coherence, causing catastrophic forgetting of the pre-trained language manifold.
+Using the same differentiable $V_\psi$ on both sides of $V_\psi-(A+V_\psi)$ cancels the prediction and is not the intended critic loss.
 
-2.  2\. Optimization Divergence (Timescale Mismatch)
+### VPG, TRPO, and PPO
 
-    Shared weights prevent the necessary decoupling of learning dynamics between the two heads.
+VPG maximizes a sampled log-probability objective weighted by fixed advantages. TRPO instead optimizes a local importance-ratio surrogate with an average KL constraint:
 
-    - **The Critic (Fast Learner):** Requires rapidly tracking non-stationary value targets ($V(s)$ changes constantly as $\pi$ evolves).
-    - **The Actor (Slow Learner):** Requires strict constraints (Trust Region/Clipping) to ensure monotonic improvement.
-    - **The Conflict:** In a shared body, you cannot tune optimizers independently. A learning rate high enough for the Critic destabilizes the Actor; a rate low enough for the Actor starves the Critic.
+$$
+\max_\theta\;\mathbb E_{t\sim\pi_{\rm old}}[\rho_t(\theta)\hat A_t],
+\quad \mathbb E_t[D_{KL}(\pi_{\rm old}(\cdot\mid s_t)\|\pi_\theta(\cdot\mid s_t))]\le\delta,
+$$
 
-3.  3\. Phasic Policy Gradient
+where $\rho_t=\pi_\theta(a_t\mid s_t)/\pi_{\rm old}(a_t\mid s_t)$. Practical TRPO approximates its theoretical trust-region update; arbitrary reuse of old data is not justified by this action ratio alone. See [TRPO](https://arxiv.org/abs/1502.05477).
 
-    Separating policy and value function training into distinct phases [PPG](https://arxiv.org/abs/2009.04416).
+PPO's clipped policy objective is
 
-#### Processing
+$$
+L^{\rm CLIP}=\mathbb E_t[\min(\rho_t\hat A_t,\operatorname{clip}(\rho_t,1-\epsilon,1+\epsilon)\hat A_t)].
+$$
 
-``` mermaid
-graph LR
-    %% Styles
-    classDef trained fill:#fff2cc,stroke:#d6b656,stroke-width:2px;
-    classDef frozen fill:#dae8fc,stroke:#6c8ebf,stroke-width:2px;
-    classDef neutral fill:#fff,stroke:#333,stroke-width:1px;
+Minimize $-L^{\rm CLIP}$ plus weighted critic loss and, optionally, a negative entropy bonus. Clipping limits the surrogate incentive; it is **not** a hard bound on policy ratios or a guarantee of monotonic improvement. $\epsilon$ is a tuned hyperparameter. PPO is a widely used method, not the sole standard for LLM alignment. See [PPO](https://arxiv.org/abs/1707.06347).
 
-    X[x] -- A --> LLM[Policy model]
-    LLM -- B --> Y[y]
+### A PPO rollout and update
 
-    Y -- C --> RM1[Reference Model]
-    Y -- D --> RM2[Reward Model]
-    Y -- E --> BE[Value model]
+Keep these models/concepts distinct:
 
-    RM1 -- "F KL" --> R((r))
-    RM2 -- "G KL" --> R
-    BE -- H --> RB((r_b))
+| Component | Role |
+|---|---|
+| Current actor | Policy being optimized |
+| Old policy | Policy that generated this rollout; store its token log-probabilities |
+| Reference policy | Usually a fixed anchor for regularization, distinct from old policy |
+| Reward source | Learned reward model, verifier, or rule-based score |
+| Critic | Expected future shaped return from each prefix, not simply the next token's reward |
 
-    R -- I --> GAE[GAE]
-    RB -- J --> GAE
+For sampled action log-probabilities $\ell_t^{\rm old}$ and $\ell_t^{\rm ref}$, one rollout shaping convention is
 
-    GAE -- K --> ADV[Advantage]
-    ADV -. L .-> LLM
+$$
+\tilde r_{t+1}=r_{t+1}-\beta(\ell_t^{\rm old}-\ell_t^{\rm ref}).
+$$
 
-    %% Classes
-    class LLM,BE trained
-    class RM1,RM2 frozen
-    class X,Y,R,RB,GAE,ADV neutral
+The sampled log-ratio can be negative; its expectation over old-policy actions is $D_{KL}(\pi_{\rm old}\|\pi_{\rm ref})$ at that state. A scalar outcome score goes at the last valid response token, not at every token.
 
+```mermaid
+flowchart TD
+    Prompt[Prompt] --> Rollout[Old policy samples response]
+    Rollout --> Stored[Store tokens and old action log-probabilities]
+    Rollout --> Reward[Reward score]
+    Rollout --> Reference[Reference action log-probabilities]
+    Rollout --> Critic[Old value estimates]
+    Stored --> Shaped[Shaped per-token rewards]
+    Reward --> Shaped
+    Reference --> Shaped
+    Shaped --> GAE[GAE and fixed return targets]
+    Critic --> GAE
+    GAE --> Update[Minibatch actor and critic updates]
+    Stored --> Update
+    Update --> Rollout
 ```
 
-![](./reinforcement_learning_ppo.png)
+Collect with no gradients, compute/store fixed advantages and return targets, then recompute current policy log-probabilities and values for each minibatch update. Keep old log-probabilities fixed across PPO epochs. Clear gradients before each update. Detach the reference, advantages, and targets. The old missing PNG illustration is replaced by the diagram above.
 
-``` python
+### PyTorch loss utilities
+
+These functions implement the numerical pieces, **not a complete trainer**. They assume finite tensors, no episode reset inside a row, and right-padded response masks with at least one valid token per sequence. `bootstrap` is zero at a true terminal and may be nonzero at a truncation. No values or logits may read future response tokens through the model's causal mask.
+
+```python
 import torch
 import torch.nn.functional as F
 
-# constants
-kl_beta = 0.1
-critic_weight = 0.5
-ppo_eps = 0.2
 
-# sample prompt completions and rewards
-with torch.no_grad():
-    completions = LLM.generate(prompts)  # (B*G, L)
-    rewards = RM(completions)  # (B*G, 1)
+def action_log_probs(logits, token_ids):
+    # Full prompt+response: logits at position j predict token j+1.
+    # Output: [batch, sequence_length - 1], before response masking.
+    return F.log_softmax(logits[:, :-1].float(), dim=-1).gather(
+        -1, token_ids[:, 1:].unsqueeze(-1)
+    ).squeeze(-1)
 
-# create a padding mask from lengths of completions in batch
-completion_mask = <... mask out padding tokens ...>
 
-# compute value function / critic output
-values = CRITIC(completions)  # (B*G, L) - predicted reward per token!
+@torch.no_grad()
+def gae_returns(rewards, old_values, mask, bootstrap, gamma=1.0, lam=0.95):
+    # rewards/old_values/mask: [B, T], response positions only.
+    mask = mask.bool()
+    if not mask.any(dim=1).all():
+        raise ValueError("Each response must contain at least one valid token")
+    if (mask[:, 1:] & ~mask[:, :-1]).any():
+        raise ValueError("Expected right padding with no gaps")
+    advantages = torch.zeros_like(rewards)
+    running = torch.zeros_like(bootstrap)
+    next_value = bootstrap.clone()
+    for t in range(rewards.shape[1] - 1, -1, -1):
+        valid = mask[:, t]
+        delta = rewards[:, t] + gamma * next_value - old_values[:, t]
+        candidate = delta + gamma * lam * running
+        running = torch.where(valid, candidate, running)
+        advantages[:, t] = torch.where(valid, running, 0.0)
+        next_value = torch.where(valid, old_values[:, t], next_value)
+    returns = torch.where(mask, advantages + old_values, 0.0)
+    return advantages, returns
 
-# get policy logprobs for each action
-llm_out = LLM(completions)
-per_token_logps = F.log_softmax(llm_out, dim=-1)  # (B*G, L)
 
-# get reference logprobs for each action
-ref_out = REF(completions)
-ref_per_token_logps = F.log_softmax(ref_out, dim=-1)  # (B*G, L)
-
-# compute KL divergence between policy and reference policy
-kl_div = per_token_logps - ref_per_token_logps
-
-# directly subtract KL divergence from rewards
-# NOTE: KL div is per token, so reward becomes per token and reward
-# for all tokens (besides last token) is just kl divergence.
-# Reward for last token is sum of outcome reward and KL div.
-rewards -= kl_beta * kl_div # (B*G, L)
-
-# compute the advantage - simple approach
-advantage = rewards - values.detach()  # (B*G, L)
-
-# compute the policy ratio
-# NOTE: old_per_token_logps must be persisted during first policy
-# update for this batch of data and re-used in each subsequent update
-policy_ratio = torch.exp(
-    per_token_logps - old_per_token_logps,
-)  # (B*G, L)
-clip_policy_ratio = torch.clamp(
-    policy_ratio,
-    min=1.0 - ppo_eps,
-    max=1.0 + ppo_eps,
-)
-
-# compute the ppo loss
-ppo_loss = torch.min(
-    advantage * policy_ratio,
-    advantage * clip_policy_ratio,
-)  # (B*G, L)
-ppo_loss = -ppo_loss
-
-# combine ppo loss and critic mse loss
-critic_loss = ((rewards - values) ** 2)  # (B*G, L)
-loss = ppo_loss + critic_weight * critic_loss
-
-# aggregate the loss across tokens (many options exist here)
-loss = ((loss * completion_mask).sum(axis=-1) /
-        completion_mask.sum(axis=-1)).mean()
-
-# perform policy gradient update
-optimizer.zero_grad()
-loss.backward()
-optimizer.step()
-
+def ppo_loss(new_logps, old_logps, advantages, new_values, returns,
+             mask, clip_eps=0.2, value_weight=0.5):
+    # All inputs [B, T], aligned to sampled response actions.
+    mask = mask.bool()
+    if not mask.any():
+        raise ValueError("No valid response tokens")
+    # Select before exponentiation: padded logps do not enter the loss.
+    ratio = (new_logps[mask] - old_logps.detach()[mask]).exp()
+    adv = advantages.detach()[mask]
+    actor = -torch.minimum(
+        ratio * adv, ratio.clamp(1 - clip_eps, 1 + clip_eps) * adv
+    ).mean()
+    critic = (new_values[mask] - returns.detach()[mask]).square().mean()
+    return actor + value_weight * critic, actor, critic
 ```
 
-Initialize the policy model, value model, optimizer, and freeze a reference policy model
-
-Sample a prompt from the dataset to start a rollout
-
-Prompt + current policy model generate a completion (no gradient)
-
-Completion + reward model produce a scalar reward per token or per sequence
-
-Completion + current policy model produce current action log-probabilities
-
-Completion + frozen reference policy model produce reference log-probabilities
-
-KL divergence between current and reference log-probabilities is computed
-
-The KL penalty is added to the reward to form the final shaped reward
-
-Completion + value model produce value estimates for each timestep
-
-Shaped rewards and value estimates are combined using GAE to compute advantages and returns
-
-Stored rollout data are shuffled and split into minibatches for PPO training
-
-Prompt and completion are passed again through the current policy to compute updated log-probabilities
-
-The ratio between updated policy probabilities and stored old policy probabilities is computed
-
-The clipped PPO objective uses this ratio and the advantages to compute the policy (actor) loss
-
-The value model is trained using mean-squared error between predicted values and computed returns
-
-Policy loss, value loss, and entropy bonus are summed to form the total PPO loss
-
-Backpropagation updates both policy and value model parameters in one optimizer step
-
-Steps 11–16 are repeated for multiple PPO epochs over the same rollout data
-
-A new rollout is collected using the updated policy, and the process repeats
-
-    for prompt in dataset:
-        # 1. Rollout
-        generated_tokens = ActorModel.generate(prompt)
-        full_text = prompt + generated_tokens
-
-        # 2. Final Reward Score
-        reward_score = RewardModel(full_text)
-
-        deltas = []
-
-        # 3. Token-Level Loop (Iterate over GENERATED tokens only)
-        for t in generated_tokens:
-
-            # KL Penalty
-            prob_actor = ActorModel(prompt + tokens_up_to_t)
-            prob_ref = ReferenceModel(prompt + tokens_up_to_t)
-            KL_t = log(prob_actor) - log(prob_ref)
-
-            # Step Reward
-            if t == last_token:
-                r_t = reward_score - (beta * KL_t)
-            else:
-                r_t = -(beta * KL_t)
-
-            # TD Error (Delta)
-            V_current = CriticModel(prompt + tokens_up_to_t)
-            V_next = CriticModel(prompt + tokens_up_to_t + t) 
-            delta_t = r_t + (gamma * V_next) - V_current
-
-            deltas.append(delta_t)
-
-        # 4. Calculate GAE (Advantage)
-        # Usually computed in reverse order to properly apply (gamma * lambda) discounts
-        A_t = compute_gae_backwards(deltas, gamma, lambda)
-
-        # 5. PPO Loss Optimization
-        # 'ratio' is the probability of the token under updated weights vs old weights
-        ratio = P_actor_new(t) / P_actor_old(t) 
-
-        # Clip the ratio, multiply by Advantage, and maximize (or minimize negative)
-        L = -mean( min(ratio * A_t, clip(ratio, 1-epsilon, 1+epsilon) * A_t) )
-
-        Loss.backward()
-        Optimizer.step()
-
-
-
-
-    ---------------------------------------------
-    for batch_prompts in dataset:
-
-        # ==========================================
-        # PHASE 1: ROLLOUT (No Gradients)
-        # ==========================================
-        with torch.no_grad():
-            # 1. Generate responses
-            responses = ActorModel.generate(batch_prompts)
-            full_texts = batch_prompts + responses
-
-            # 2. Get old log probabilities and values
-            old_log_probs = ActorModel.get_log_probs(full_texts)
-            ref_log_probs = ReferenceModel.get_log_probs(full_texts)
-            values = CriticModel(full_texts)
-
-            # 3. Get Reward Model scores for the finished sentences
-            reward_scores = RewardModel(full_texts)
-
-            # 4. Vectorized step math (Calculated all at once, no loop!)
-            KL_penalties = old_log_probs - ref_log_probs
-            step_rewards = compute_step_rewards(reward_scores, KL_penalties)
-
-            # 5. Compute GAE and Returns for the whole batch
-            advantages, returns = compute_gae_vectorized(step_rewards, values, gamma, lambda)
-
-        # ==========================================
-        # PHASE 2: PPO TRAINING (With Gradients)
-        # ==========================================
-        # PPO reuses the rollout data for multiple epochs
-        for ppo_epoch in range(PPO_EPOCHS):
-            for mini_batch in create_mini_batches(full_texts, old_log_probs, advantages, returns):
-
-                # 1. Get NEW log probs and NEW values from updated models
-                new_log_probs = ActorModel.get_log_probs(mini_batch.texts)
-                new_values = CriticModel(mini_batch.texts)
-
-                # 2. Calculate Ratio
-                ratio = torch.exp(new_log_probs - mini_batch.old_log_probs)
-
-                # 3. ACTOR LOSS (Policy Loss with Clipping)
-                surr1 = ratio * mini_batch.advantages
-                surr2 = torch.clamp(ratio, 1.0 - epsilon, 1.0 + epsilon) * mini_batch.advantages
-                actor_loss = -torch.min(surr1, surr2).mean()
-
-                # 4. CRITIC LOSS (Value Loss: MSE between predicted values and actual returns)
-                critic_loss = MSE(new_values, mini_batch.returns)
-
-                # 5. Total Loss & Backprop
-                total_loss = actor_loss + (value_coefficient * critic_loss)
-
-                total_loss.backward()
-                Optimizer.step()
+Align the response mask to the **shifted** next-token targets. `log_softmax` alone still has shape `[B,L,V]`; `gather` selects the sampled action and removes the vocabulary dimension. Keep EOS as a valid token when it belongs to the response. This example averages valid tokens globally, so longer responses have more weight; per-response averaging is a different choice.
 
 ## GRPO
 
-``` mermaid
-graph LR
-    %% Styles
-    classDef trained fill:#fff2cc,stroke:#d6b656,stroke-width:2px;
-    classDef frozen fill:#dae8fc,stroke:#6c8ebf,stroke-width:2px;
-    classDef neutral fill:#fff,stroke:#333,stroke-width:1px;
+For $G$ responses to the **same prompt**, with scalar scores $R_i$:
 
-    X[x] -- A --> LLM[Your LLM]
-    LLM -- B --> YG["Group outputs (y1 y2 yG)"]
+$$
+\bar R=\frac1G\sum_iR_i,\qquad
+\hat A_i=\frac{R_i-\bar R}{\sigma_R+\varepsilon_{\rm num}}.
+$$
 
-    YG -- C --> RM[Reference Model]
-    YG -- D --> RewM[Reward Model]
+It is each individual reward minus the mean, not the sum of rewards minus the mean. Specify the standard-deviation convention and handle zero variance. An all-equal-score group provides no relative reward signal.
 
-    RM -- "E KL" --> RG((r_group))
-    RewM -- F --> RG
+The original outcome-supervised GRPO objective includes response-length averaging:
 
-    RG -- G --> GC[Group-relative computation]
-    GC -- H --> ADV["Advantages per sample"]
-    ADV -. I .-> LLM
+$$
+J=\mathbb E\left[\frac1G\sum_{i=1}^G\frac1{|o_i|}\sum_t
+\left\{\min(\rho_{i,t}\hat A_i,\operatorname{clip}(\rho_{i,t},1-\epsilon,1+\epsilon)\hat A_i)
+-\beta D_{KL}\right\}\right].
+$$
 
-    %% Classes
-    class LLM trained
-    class RM,RewM frozen
-    class X,YG,RG,GC,ADV neutral
+GRPO removes the learned value critic, not the need for rewards. Rewards may be rules or learned scores. In the original formulation, reference KL is a separate regularizer, not automatically folded into group normalization. Removing a critic saves its cost but adds group sampling and does not eliminate all optimization difficulties. See [DeepSeekMath](https://arxiv.org/html/2402.03300v3).
 
+```mermaid
+flowchart LR
+    Prompt[Same prompt] --> Group[Group of sampled responses]
+    Group --> Scores[Reward scores]
+    Scores --> Adv[Group-normalized advantages]
+    Group --> Ratio[Current / old action ratios]
+    Reference[Reference policy] --> KL[KL regularization]
+    Group --> KL
+    Adv --> Loss[GRPO objective]
+    Ratio --> Loss
+    KL --> Loss
 ```
 
-![](./reinforcement_learning_grpo.png)
+## MoE
 
-Group Relative Policy Optimization (GRPO) resolves these conflicts by **eliminating the Critic network entirely**.
+Mixture-of-experts routing selects expert subnetworks. Shared experts can process every token; describing them as guaranteed “common-sense experts” assigns a meaning not established by the architecture.
 
-By removing the Critic part, GRPO removes the **source** of the interference. There are no value-function gradients to clash with the language modeling objectives. Instead of a learned Value Function $V(s)$ (which requires a separate network/optimizer), GRPO estimates the baseline using the **mean reward of a group of outputs**:
+For Switch-style top-1 routing, a balancing loss is
 
 $$
-A_i = \frac{r_i - \text{mean}(r_{1..G})}{\text{std}(r_{1..G})}
+L_{\rm aux}=\alpha N\sum_{i=1}^N f_iP_i,
 $$
 
-### MoE
+where $f_i$ is the fraction of tokens assigned to expert $i$ and $P_i$ is its average router probability. This encourages balanced usage; it does not guarantee identical specialization or equal realized load. See [Switch Transformers](https://arxiv.org/abs/2101.03961).
 
-With shared Experts for common sense training. in order to train all Experts P,
-
-- Switch transformer, minimize the loss to force the f and P to be uniformly distributed : $loss = \alpha \cdot N \cdot \sum_{i=1}^{N} f_{i} \cdot P_{i}$
-- Loss free: using self-adjusted bias before softmax to control the P.
-  - if some experts have too many tokens, decrease the bias,
-  - if some experts have too few tokens, increase the bias.
-- DeepSeek use bias parameter before active function for dynamical adjustment of token loading for each expert
+DeepSeek-V3's auxiliary-loss-free balancing adjusts a per-expert bias used for **selection**: overloaded experts receive lower bias, underloaded experts higher bias. The bias is not simply a universal “before softmax” modification; its unmodified affinity scores determine the selected experts' mixture weights. The report also describes a separate sequence-wise balancing term. See [DeepSeek-V3](https://arxiv.org/html/2412.19437v2).
 
 ## Multi-token training
 
-### Multi-token prediction
+### MTP versus speculative decoding
 
-predict multiple tokens, some are from small model. If LLM accepts them, it does not need to generate them again.
+**Multi-token prediction (MTP)** trains extra future-token predictions. **Speculative decoding** proposes tokens and verifies them with a target model; a smaller draft model is one way to produce proposals. These are distinct ideas, although MTP heads can support speculative decoding. Correct rejection/correction sampling, not simply “accept if plausible,” is needed to preserve a target sampling distribution. Sources: [MTP](https://arxiv.org/abs/2404.19737), [speculative decoding](https://arxiv.org/abs/2211.17192).
 
-#### The Core Concept: MTP as an Implicit Critic
+### Research proposal: shared backbone, value head, and MTP loss
 
-We reject GRPO (which requires generating groups for a baseline). Instead, we use **Time** as our baseline.
+The original “MTP as an implicit critic” discussion is an **unvalidated design proposal**, not a published algorithm established by these notes. Adding a scalar value head still introduces a critic, even when there is no separate critic backbone. MTP token prediction alone is not value learning.
 
-We use a single Transformer. The **MTP Modules** (which normally predict future tokens) are slightly modified to also predict the **Value (Expected Future Reward)** of those tokens.
-
-- **No Separate Critic Network:** The MTP heads **are** the Critic.
-- **No Group Sampling:** We do not compare against a group average. We compare against our own prediction from the **next** step (Bootstrapping).
-- **One Network:** Parameters $\theta$ are shared.
-
-#### Architecture: The "Value-Aware" MTP Head
-
-Standard DeepSeek MTP predicts tokens $t_{n+1}, t_{n+2} \dots$. We modify the output projection of the MTP modules to output two things:
-
-1.  **Token Logits:** $P(t_{n+k})$ (What happens next?)
-2.  **Scalar Value:** $V_{n+k}$ (How good is it?)
-
-**Equation:**
+A coherent baseline design defines $V_\psi(s_t)$ as the value of the **current** prefix. With a target estimate $V_{\bar\psi}$:
 
 $$
-[ \text{Logits}_{k}, v_{k} ] = \text{MTP Head}_k(h_n)
+y_t=r_{t+1}+\gamma(1-d_t)V_{\bar\psi}(s_{t+1}),\qquad
+\hat A_t=\operatorname{stopgrad}(y_t-V_\psi(s_t)),
 $$
 
-Where $v_k$ represents the expected return starting from step $n+k$.
+$$
+L_{\rm actor}=-\hat A_t\log\pi_\theta(a_t\mid s_t),\qquad
+L_V=(V_\psi(s_t)-\operatorname{stopgrad}(y_t))^2,
+$$
 
-#### The Algorithm: Recursive Value Propagation
+$$
+L=L_{\rm actor}+c_VL_V+c_{\rm MTP}L_{\rm MTP}+c_{\rm LM}L_{\rm LM}.
+$$
 
-1.  A. Forward Pass (Generation & Storage)
+The direct actor expression assumes appropriately sampled fresh data; repeated updates need a justified off-policy or PPO-style treatment. The token losses require explicit supervised targets. Omitting the actor term does not, by itself, implement policy-gradient reward optimization.
 
-    At time step $t$, the network produces:
-
-    1.  **Action:** Sample $a_t$ from the main policy head.
-    2.  **Lookahead Values (Internal Value):** The MTP heads produce value estimates for future steps:
-        - MTP Head 1 gives $v^{(1)}_t$ (Estimate of $V(s_{t+1})$)
-        - MTP Head 2 gives $v^{(2)}_t$ (Estimate of $V(s_{t+2})$)
-
-    We **save** these internal value estimates $v^{(k)}_t$ into a buffer.
-
-2.  B. Interaction
-
-    Execute action $a_t$. Observe Reward $r_{t+1}$ and next state $s_{t+1}$.
-
-3.  C. The "Next Step" Operation (Bootstrapping)
-
-    This is the key requirement you mentioned. We use the value calculated at $t+1$ to update the network at $t$.
-
-    We define the **TD Target** (Temporal Difference):
-
-    $$
-    Y_t = r_{t+1} + \gamma v^{(1)}_{t+1}
-    $$
-
-    **Note:** $v^{(1)}_{t+1}$ is the "Value of the next state" predicted by the MTP head at the **next** step.
-
-4.  D. The Update (Loss Function)
-
-    We update the single network $\theta$ with three components:
-
-    1.  **Policy Loss (Actor):** Maximize likelihood of $a_t$ if the Advantage is positive.
-
-        $$
-        \delta_t = Y_t - v^{(1)}_t \quad (\text{Advantage} = \text{Target} - \text{Prediction})
-        $$
-
-        $$
-        L_{policy} = - \delta_t \ln \pi(a_t|s_t)
-        $$
-
-    2.  **MTP Value Consistency Loss (The "Saved Value" Update):** Force the MTP head at step $t$ to accurately predict the value at $t+1$.
-
-        $$
-        L_{value} = (v^{(1)}_t - \text{stop\_grad}(Y_t))^2
-        $$
-
-    3.  **MTP Token Loss (Auxiliary):** Keep the standard MTP token prediction to ensure the representations remain grounded in language/reasoning.
-
-        $$
-        L_{token} = \text{CrossEntropy}(\text{MTP\_Heads})
-        $$
-
-    $$
-    L_{total} = L_{policy} + \alpha L_{value} + \beta L_{token}
-    $$
-
-    —
-
-#### Why this meets the criteria
-
-1.  **Single Network:** The Policy and Value are fused. The "Value" is just a tiny scalar output on the existing MTP heads.
-2.  **No GRPO:** We don't need multiple samples to find a baseline. We use the **Bellman Consistency** ($V_t \approx r + V_{t+1}$) as the training signal.
-3.  **MTP Integration:** The MTP heads are essential. They provide the "Lookahead" capability that stabilizes the single-network value estimation (reducing the noise of a single step).
-4.  **Internal Value Saved:** The training relies on carrying the scalar $v$ from step $t+1$ backward to step $t$.
-
-#### Visualization of Data Flow
-
-``` text
-Step T:
-   Input -> [Backbone] -> h_t
-              |-> Main Head -> Action a_t (Sampled)
-              |-> MTP Head  -> Predicts V_t (Saved)
-
-       --- Environment Step (r_t) --->
-
-Step T+1:
-   Input -> [Backbone] -> h_{t+1}
-              |-> MTP Head  -> Predicts V_{t+1} (Used as Target)
-
-Update T:
-   Target = r_t + gamma * V_{t+1}
-   Error  = Target - V_t
-   Backprop Error through h_t
+```text
+prefix s_t -> shared backbone -> policy head -> action a_t
+                            -> value head  -> V(s_t)
+                            -> MTP heads   -> future-token predictions
+next prefix s_(t+1) -> value estimate -> detached TD target for V(s_t)
 ```
 
-### New way with stable assumption
+If a lookahead head instead claims to predict $V(s_{t+k})$, specify whether it conditions on sampled future tokens or marginalizes over them. It cannot know a realized future prefix before those actions occur. The old equations shifted the value indexing inconsistently by one step.
 
-#### 1. The Core Innovation
+### Stability and evaluation
 
-A unified architecture where **MTP Heads** serve a dual purpose:
+An exponential moving average, $\bar\psi\leftarrow\tau\psi+(1-\tau)\bar\psi$, differs from periodic hard copying. Copying only the value/MTP head does not freeze its target function if the shared backbone keeps changing. A small output layer is cheap, but a complete MTP module may contain substantial transformer computation; its size is architecture-dependent.
 
-1.  **Syntax/Logic:** Predicting future tokens (Language Modeling).
-2.  **Planning:** Predicting future **value** (Implicit Critic).
+This proposal may save memory relative to two full backbones, but savings and learning quality require measurement. Bootstrapping does not reveal exactly which token caused a reward, and MTP does not guarantee better planning or lower variance. There is no established “golden” loss ratio or general justification for fixing the value coefficient to `0.1`.
 
-#### 2. Strengths (Why do this?)
+Compare against a standard shared-backbone actor-critic and suitable PPO/GRPO baselines. Measure reward, held-out language quality, value calibration, memory, and throughput. Ablate MTP loss, target-update strategy, and loss weights before claiming a benefit.
 
-- **Extreme Efficiency:** Eliminates the memory cost of a separate Critic (PPO) and the compute cost of Group Sampling (GRPO).
-- **Temporal Credit Assignment:** Unlike GRPO (which gives the same reward to the whole sentence), this method assigns specific values to specific tokens via bootstrapping.
-- **Dopamine Signals:** The MTP value prediction ($v_t$) acts like a localized dopamine signal, telling the model **exactly** when it made a good move, not just at the end.
+## Review notes
 
-#### 3. The "Stability" Bottleneck (Critical Risk)
-
-#### The Problem: Chasing your own Tail
-
-Since we use the **same network** to generate the target $V_{t+1}$ and the prediction $V_t$, the training can oscillate or diverge.
-
-#### The Solution: Periodic Target Updates (Polyak Averaging)
-
-We cannot easily afford a second full network. However, we can keep a **lightweight copy** of **just** the MTP heads (a few MBs).
-
-- **Active Heads ($\theta$):** Learn rapidly.
-
-- **Target Heads ($\theta'$):** Update slowly ($\theta' \leftarrow \tau\theta + (1-\tau)\theta'$).
-
-- **Stabilized Rule:**
-
-  $$
-  Y_t = r_{t+1} + \gamma \text{MTP}_{\text{target}}(s_{t+1})
-  $$
-
-#### 4. Final Recommendation
-
-This algorithm is feasible but requires careful tuning of the **Auxiliary Loss Balance**.
-
-#### The "Golden Ratio" Loss:
-
-$$
-L = L_{\text{token}} + \lambda_1 L_{\text{MTP\_tokens}} + \lambda_2 L_{\text{TD\_Value}}
-$$
-
-- If $\lambda_2$ is too high, the "Value" objective will overwrite the "Language" objective (Catastrophic Forgetting).
-- If $\lambda_2$ is too low, the agent won't plan.
-- **Recommendation:** Start with $\lambda_2 = 0.1$ and clamp the value gradients.
+The mathematical corrections above preserve the original learning topics while removing repeated PPO pseudocode, invalid placeholders, and references to missing images. The numerical functions are educational building blocks, not evidence of a trained model or convergence on a real task.

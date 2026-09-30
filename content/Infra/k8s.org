@@ -1,0 +1,1245 @@
+:PROPERTIES:
+:ID:       E54655C5-ACAC-40C2-A220-410DA7616094
+:END:
+#+TITLE: k8s
+#+OPTIONS: num:t
+#+STARTUP: overview
+#+EXPORT_FILE_NAME: /home/si/Dropbox/Base/html/k8s.html
+#+PROPERTY: header-args :eval no-export
+#+SETUPFILE: https://fniessen.github.io/org-html-themes/org/theme-readtheorg.setup
+* Docker
+** pull
+Docker daemon prefixes docker.io/library/ for default images on Docker Hub when no registry is specified
+** build
+#+begin_src 
+  docker build -t name:tag .
+  docker build -t entry-image -f /path/to/custom-dockerfile /path/to/build-context
+#+end_src
+  -t:  Name and optionally a tag (format: "name:tag")
+  -  ADD and COPY can only access files within the build context specified in the docker build command (e.g., /path/to/build-context). Files outside the build context cannot be directly referenced in the Dockerfile.
+
+** tag
+#+begin_src
+  docker tag my-current-image:tag my-username-in-dockerhub/my-wanted-image-name:mytag
+  docker push my-current-image:tag my-username-in-dockerhub/my-wanted-image-name:mytag
+#+end_src
+tag change the name(with dockerhub name) and the tag for pushing
+** Microservices
+- Scalability	Each microservice can scale independently based on demand.
+- Fault Isolation	Failure in one service does not crash the entire application.
+- Faster Deployment	Teams can deploy and update services independently.
+- Technology Flexibility	Different services can use different programming languages.
+- Easier Maintenance	Smaller codebases are easier to manage and debug.
+
+* Dokcerfile
+** EXPOSE
+Missing EXPOSE 5000 won’t break your setup if you explicitly map ports with -p 80:5000. It’s primarily a documentation and automation feature. For clarity and best practices, include EXPOSE 5000 in your Dockerfile to indicate the port your application uses.
+
+** CMD echo "Hello World" && CMD ["echo", "Hello World"]
+- CMD echo "Hello World":  start a shell and run the command, with shell features
+- CMD ["echo", "Hello World"]:  run the command directly, withour to start a shell
+- CMD: can be easyly overridden by docker run ...
+** ENTRYPORT 
+- Can only be explicitly overridden by docker run ... --entryport ...
+- Implicity run without --entryport  after docker run... will append arguments at end
+
+** Docker's multi-stage
+builds offer a powerful way to manage production environments by separating build and runtime stages, ensuring smaller images, faster deployments, and enhanced security.
+* Kubernetes
+** namespace
+- Context contains cluster, users, and namespace, they are not coupled, we can change the namespace of a contex.
+#+begin_src
+  kubectl config set-context --current --namespace=app1-ns
+#+end_src
+
+** Pod
+Basic Pod-Related Commands
+- Create a Pod: kubectl apply -f pod.yaml
+- List all Pods: kubectl get pods
+- List Pods with details: kubectl get pods -o wide
+- Describe a Pod: kubectl describe pod <pod-name>
+- View Pod logs: kubectl logs <pod-name>
+- View logs for a specific container: kubectl logs <pod-name> -c <container-name>
+- Stream live Pod logs: kubectl logs -f <pod-name>
+- Execute a command in a Pod: kubectl exec -it <pod-name> -- /bin/bash
+- Execute a command in a specific container: kubectl exec -it <pod-name> -c <container-name> -- /bin/bash
+- Delete a Pod: kubectl delete pod <pod-name>
+** Labels
+- Labels: Key-value pairs attached to Kubernetes objects like pods, enabling logical grouping and selection.
+
+- Kubernetes Features That Use Labels and Selectors:
+  - ReplicationController,
+  - ReplicaSet,
+  - Deployments,
+  - StatefulSets,
+  - DaemonSets,
+  - Services,
+  - Jobs,
+  - CronJobs,
+  - and NetworkPolicies.
+
+    #+begin_src
+      kubectl label nodes my-second-cluster-worker env=prod
+      kubectl label nodes my-second-cluster-worker storage-
+      
+    #+end_src
+** Selectors
+- Selectors: Expressions or equality-based filters used to match objects based on their labels, enabling precise control over resource management.
+- It only apply to the Pod level(Node or Service), not to the container level
+
+*** Equality-Based
+for
+- rc,
+- rs,
+- deployment
+  #+begin_src
+    selector:
+      matchLabels:
+        app: nginx
+  #+end_src
+
+*** Set-Based
+- for rs, and deloyment
+- usign: In, NotIn, Exists, DoesNotExist
+  #+begin_src
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - nginx
+          - apache
+      - key: environment
+        operator: NotIn
+        values:
+          - development
+      - key: tier
+        operator: Exists
+      - key: debug
+        operator: DoesNotExist
+  #+end_src
+
+** ReplicationController
+- Ensures a specified number of pod replicas are running at any given time
+
+** ReplicaSet
+- ReplicaSet is an improved version of ReplicationController.
+- It supports set-based selectors, providing more flexibility in managing pods.
+- ReplicaSets are often managed by Deployments, which add advanced capabilities.
+** Deployment
+-  build on top of ReplicaSets, with rolling update and rollbacks, automated update, scaling and simplified management
+** Annotation
+- They are used to record important information to assist other tools. useful case for keep tracking some values. such as following:  kubernetes.io/change-cause
+- Annoations can only under the metedata attributes, neither directly under the object metedata, or spec.templated.metedata!!!
+
+*** A: 
+#+begin_src
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kubernetes.io/change-cause: "Initial release with nginx 1.19"
+  name: nginx-deployment
+spec:
+  ....
+#+end_src
+
+*** B: 
+after applying the file and check the annoation
+#+begin_src
+  kubectl rollout history deployment nginx-deployment
+#+end_src
+I would able to see the default annotation.
+
+*** C:
+Then I can update my container for next version(only for deployment, not rc and rs)
+#+begin_src
+  kubectl set image deployment nginx-deployment nginx-container=nginx:1.20
+#+end_src
+ and set new annotation with
+ #+begin_src
+   kubectl annotate deployments nginx-deployment kubernetes.io/change-cause="Upgraded my container"
+ #+end_src
+OR modify my Deployment manifest and apply.
+Now verify the history with
+#+begin_src
+  kubectl rollout history deployment nginx-deployment
+#+end_src
+ 
+*** D:
+rollback to special version with
+#+begin_src
+  kubectl rollout undo deployment nginx-deployment --to-revision=1
+#+end_src
+
+** Service
+- A fixed IP and DNS name so that pods can always be found, even if their individual IPs change.
+- Load balancing across multiple pod replicas to distribute traffic evenly.
+- Internal and external communication
+*** ClusterIP
+
+*** NordPort
+*** Loadbalance
+*** ExternalName
+
+** Manual scheduling
+- Explicitly assigning a pod to a node using the nodeName field in the pod’s YAML manifest
+#+begin_src
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-manual
+spec:
+  nodeName: my-second-cluster-worker2  # Assign pod to a specific worker node
+  containers:
+    - name: nginx
+      image: nginx
+#+end_src
+** Static pods
+- Static pods are defined in /etc/kubernetes/manifests/ and  not managed by the Kubernetes API server
+- To ensure visibility in kubectl get pods, Kubelet creates a read-only "mirror pod" on the API server
+- if get deleted, will be recreated automatically
+
+** nodeSelector
+- at Pod level
+- at least one match key-value lable
+*** label: Apply label to node
+#+begin_src
+  kubectl label nodes my-second-cluster-worker storage=ssd
+  kubectl label nodes my-second-cluster-worker storage-
+#+end_src
+*** selector apply to pod/Deployment
+#+begin_src
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ns-deploy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: app1
+  template:
+    metadata:
+      labels:
+        app: app1
+    spec:
+      nodeSelector:
+        storage: ssd
+      containers:
+        - name: nginx
+          image: nginx
+#+end_src
+
+- A node can have multiple labels. A pod will only be scheduled if all labels in nodeSelector match.
+
+*** Takeaway: Pure lebel matching mechanismus,lack of flexibility, only with key-value matching selection
+** Taints and Tolerations
+- Taints and Tolerations help control which pods can be scheduled on which nodes
+- Taints and tolerations are applied during scheduling
+*** Taints Apply to node
+  #+begin_src 
+    kubectl taint nodes my-second-cluster-worker storage=ssd:NoSchedule
+    kubectl taint nodes my-second-cluster-worker2 storage=hdd:NoSchedule
+    kubectl taint nodes my-second-cluster-worker storage=ssd:NoSchedule-  
+  #+end_src
+
+| Effect           | Behavior                                                                   |
+|------------------+----------------------------------------------------------------------------|
+| NoSchedule       | New pods will not be scheduled unless they have a matching toleration.     |
+| PreferNoSchedule | Kubernetes tries to avoid scheduling pods but doesn’t enforce it strictly. |
+| NoExecute        | Existing pods without a matching toleration will be evicted from the node. |
+
+*** Toleration Apply to pod
+#+begin_src
+  tolerations:
+  - key: "storage"
+    operator: "Equal"
+    value: "ssd"
+    effect: "NoSchedule"
+#+end_src
+
+- This tolerates nodes that have the taint storage=ssd:NoSchedule, allowing the pod to be scheduled on them.
+- The Effect in the toleration must match the Effect in the taint for it to take effect.
+*** Takeaway: Lebel matching with hardness configuation, NoExecute supports re-evaluation. If a node’s taints change and a pod doesn’t tolerate them, it will be evicted
+*** The effect should be match for scheduling
+*** tolerationSeconds is only work with NoExecute, which limits the lifetime of pod if other match. While if not set, the match and scheduling stay forever.
+** Node Affinity
+- requiredDuringSchedulingIgnoredDuringExecution: Hard rule, must match
+- preferredDuringSchedulingIgnoredDuringExecution: Soft rule, NOT must
+- node labels are the same with node selector
+- all requests from matchExpressions need to be filled
+#+begin_src
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preferred-na-deploy
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: app1
+  template:
+    metadata:
+      labels:
+        app: app1
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: storage
+                operator: In
+                values:
+                  - ssd
+                  - hdd
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 10
+              preference:
+                matchExpressions:
+                  - key: storage
+                    operator: In
+                    values:
+                      - ssd
+            - weight: 5
+              preference:
+                matchExpressions:
+                  - key: storage
+                    operator: In
+                    values:
+                      - hdd
+      containers:
+        - name: nginx
+          image: nginx
+#+end_src
+
+
+| Operator     | Behavior                                                            |
+|--------------+---------------------------------------------------------------------|
+| In           | Matches if the node’s label exists in the provided values.          |
+| NotIn        | Matches if the node’s label does not exist in the provided values.  |
+| Exists       | Matches if the node has the specified key, regardless of its value. |
+| DoesNotExist | Matches if the node does not have the specified key.                |
+| Gt           | Matches if the label’s value is greater than the specified number.  |
+| Lt           | Matches if the label’s value is less than the specified number.     |
+  
+
+
+*** Takeaway: The most flexible way to optimize the resource utilization, be careful for multiple conditions(AND / OR)
+
+** nodeSelector vs train/toleration vs nodeAffinity
+- nodeSelector specify explicitly, hard rule to only include the one
+- use  train/toleration and nodeAffinity can implicity exclude the all not suitable
+
+** Request and limits
+- Requests and limits must be defined per container inside a Pod.
+- If a container exceeds its requested resources, it can still use more resources if available on the node.
+- If a container exceeds its limited CPU resource: CPU is a compressible resource, so workloads slow down instead of failing
+- If a container exceeds its limited Memary resource: the kernel may kill it,  But If there is no memory pressure, the container may not be killed immediately
+*** Monitoring
+Install metrics server on Kubernetes
+#+begin_src
+  kubectl top nodes
+#+end_src
+
+** Scaling
+- Scaling refers to adjusting the resources available to an application based on its demand/load.
+*** Horizontal Scaling
+- Scale-Out: Increasing the number of pod replicas
+- Scaling In: Removing instances/pods when load decreases
+- Manually: Editing the Deployment YAML (replicas field) and apply
+- Automatic: HPA (Horizontal Pod Autoscaler)
+
+  
+*** Vertical Scaling
+- Scaling Up: Increasing CPU/Memory resources of the existing pod or VM.
+- Scaling Down: Reducing CPU/Memory.
+- Manually: Editing the Deployment YAML (replicas field) and apply
+- Automatic: VPA (Vertical Pod Autoscaler)
+
+
+*** Node side
+clusters rely on horizontal scaling of nodes to maintain availability. vertical scaling requeir restarting, which is not working for production environment
+
+** Horizontal Pod Autoscaler (HPA)
+based on the default/custom/External Resource Metrics to automatically scale out/in
+
+** Vertical Pod Autoscaler (VPA)
+** Multi-container pods
+
+a primary container complemented by one or more helper containers
+*** Init Containers
+successfully complete before the primary container runs as pre-requests
+#+begin_src
+apiVersion: v1
+kind: Pod
+metadata:
+  name: init-demo
+spec:
+  initContainers:
+  - name: check-api
+    image: curlimages/curl:latest
+    command:
+      - sh
+      - -c
+      - |
+        echo 'Checking API availability...'
+        sleep 25
+        until curl -s https://kubernetes.io > /dev/null; do
+          echo 'Waiting for API...'
+          sleep 5
+        done
+        echo 'API is accessible, proceeding to main-app container!'
+  containers:
+  - name: main-app
+    image: nginx:latest
+#+end_src
+*** Sidecar Pattern
+run alongside the primary container and operate independently to extend or complement the main container's functionality.
+#+begin_src
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sidecar-logging-demo
+spec:
+  containers:
+  # Main application container
+  - name: main-app
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+  # Sidecar container
+  - name: health-logger
+    image: curlimages/curl:latest
+    command:
+    - sh
+    - -c
+    - |
+      while true; do
+        curl -s http://localhost:80 > /dev/null && echo 'Main app is healthy' || echo 'Main app is unhealthy'
+        sleep 5
+      done
+
+#+end_src
+*** Ambassador Pattern
+like sidecar but only focus on handling external communication
+*** Adapter Pattern
+like sidecar but only focus on data transforming or normalizing
+** Pod Policies
+*** Delete policies
+- graceful termination for 30 seconds, after that SIGKILL will terminate it immediately if it still lives
+  #+begin_src
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx- graceful
+spec:
+  terminationGracePeriodSeconds: 30
+  containers:
+  - name: nginx
+    image: nginx:latest
+  #+end_src
+apply and delete
+    #+begin_src
+    kubectl delete pod xxx
+  #+end_src
+
+  for forceful deletion:
+  #+begin_src
+    kubectl delete pod mypod --force=true --grace-period=0
+  #+end_src
+
+*** Restart Policies
+how Kubernetes responds when containers within a pod terminate, it's at the pod level and apply to all containers within the pod
+- Always(whether it succeeds with exit code 0 or fails with a non-zero exit code):
+  - Pods,
+  - Deployments,
+  - ReplicaSets,
+  - StatefulSets,
+  - DaemonSets
+- OnFailure, restart if exit code is not 0
+  - Jobs
+  - Cronjobs
+  - Standalone Pod
+- Never: not restarted, regardless of the exit code (whether it succeeds or fails)
+  - one-time task
+
+  #+begin_src
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch-job-example
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: processor
+        image: my-batch-job:latest
+  #+end_src
+
+*** Image Pull Policies
+how the container runtime pulls container images for initialization. At Container level for each containter customizable
+#+begin_src
+apiVersion: v1
+kind: Pod
+metadata:
+  name: always-example
+spec:
+  containers:
+  - name: my-app
+    image: myrepo/my-app:latest
+    imagePullPolicy: Always
+#+end_src
+
+- Always, default, prefer for development
+- IfNotPresent, only NOT available on the node cache
+- Never, assuming the image is already present on the node.
+- if Image tag is latest, default police is Always,
+- if image tag is with specific version tag, default police is IfNotPresent
+
+*** Pod Lifecycle and debugging see [[https://github.com/CloudWithVarJosh/CKA-Certification-Course-2025/tree/main/Day%2022][Day 22]]
+   - Pending, Runing, Successded, Failed, Unknown
+   - CrashLoopBackOff, ImagePullBackOff, OOMKilled, Unknown
+   
+** health probes
+The kubelet is responsible for performing these probes. 
+*** Readiness Probes
+only health pods receiving traffic, otherwise removed, no restart
+*** Liveness Probes
+with restarting if failed
+*** Startup Probes
+set threshold times of attempts before marked as failed for slow-starting
+
+*** Methode
+- HTTP GET Requests
+- TCP Socket
+- Command Execution
+
+** Ephemeral Storage
+*** emptyDir
+It is ideal for scratch space (Temporary workspace for processing.), caching, or temporary computations where data persistence isn’t required.
+
+#+begin_src
+apiVersion: v1  # Specifies the API version used to create the Pod.
+kind: Pod       # Declares the resource type as a Pod.
+metadata:
+  name: emptydir-example  # Name of the Pod.
+spec:
+  containers:
+  - name: busybox-container  # Name of the container inside the Pod.
+    image: busybox           # Using the lightweight BusyBox image.
+    command: ["/bin/sh", "-c", "sleep 3600"]  # Overrides the default command. Keeps the container running for 1 hour (3600 seconds).
+    volumeMounts:
+    - mountPath: /data       # Mount point inside the container where the volume will be accessible.
+      name: temp-storage     # Refers to the volume defined in the `volumes` section below.
+  - name: busybox-container-2  # Name of the container inside the Pod.
+    image: busybox           # Using the lightweight BusyBox image.
+    command: ["/bin/sh", "-c", "sleep 3600"]
+    volumeMounts:
+    - mountPath: /data
+      name: temp-storage
+  volumes:
+  - name: temp-storage       # Name of the volume, must match the name in `volumeMounts`.
+    emptyDir: {}             # Creates a temporary directory that lives as long as the Pod exists.
+                            # Useful for storing transient data that doesn't need to persist.
+
+#+end_src
+all containter by applying this yaml will access the same data as in volume.
+
+*** Downward API
+- It injectes into containers in a Pod either as environment variables or through mounted files via volumes
+- Just like Sidecar pattern, This helps sidecar containter to get matrics from the main contrainter.
+- please refer [[https://github.com/CloudWithVarJosh/CKA-Certification-Course-2025/tree/main/Day%2026][env and file mount at github]]
+  
+** Volume [[https://github.com/CloudWithVarJosh/CKA-Certification-Course-2025/blob/main/Day%2027/README.md][link]]
+- hostPath: Persistent change map to host machine, the data can be shared between different pods only if they are scheduled on the same node.
+- Storage class, a replace of pv
+- pv (persistentvolume) clain a  physical  storage(retain, delete) global at cluster level
+- pvc(persistentvolumeClaim) use the pv under a namespace, all the charactore muss be passend
+- pod, chaim the volume and mount it to somewhere in container
+- to delete, pod at first, otherwise pv/pvc hold still until pod died
+
+*** PV vs PVC
+- common: storageClassName, accessModes,
+- PV: capacity, PersistentVolumeReclaimPolicy, hostPath
+- PVC: resource, volumeName
+
+*** hostPath
+**** in volumes
+#+begin_src yaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+    spec:
+      containers:
+        volumeMounts:
+        - name: mypd
+          mountPath: "/var/www/html/1"
+          
+      volumes:
+      - name: myvol1
+        hostPath:
+          path: /any/path/it/will/be/replaced
+#+end_src
+**** in PV
+#+begin_src yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+spec:
+  hostPath:
+    path: /opt/volume/nginx
+#+end_src
+
+*** storageClassName
+#+begin_src yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+spec:
+  storageClassName: maunal
+#+end_src
+
+#+begin_src yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+spec:
+  storageClassName: maunal
+#+end_src
+*** volumeName
+#+begin_src yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+spec:
+  volumeName: log-volume
+
+#+end_src
+
+*** configMap
+#+begin_src yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-cm  # Name of the ConfigMap, used for reference in Pods or Deployments.
+data:
+  APP: "frontend"  # Key-value pair that can be used as an environment variable in a Pod.
+  ENVIRONMENT: "production"  # Another environment variable for defining the environment.
+  index.html: |  # When mounted as a volume, this key creates a file named 'index.html' with the following contents.
+    <!DOCTYPE html>
+    <html>
+    <head><title>Welcome</title></head>
+    <body>
+      <h1>This page is served by nginx. Welcome to Cloud With VarJosh!!</h1>
+    </body>
+    </html>
+  
+---  
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deploy  # Name of the Deployment
+spec:
+  replicas: 3  # Number of pod replicas
+  selector:
+    matchLabels:
+      app: frontend  # Label selector to identify Pods managed by this Deployment
+  template:
+    metadata:
+      labels:
+        app: frontend  # Label to match with the selector above
+    spec:
+      containers:
+      - name: frontend-container  # Name of the container
+        image: nginx  # NGINX image to serve web content
+        env:
+        - name: APP
+          valueFrom:
+            configMapKeyRef:
+              name: frontend-cm  # Name of the ConfigMap to pull the key from
+              key: APP  # Key in the ConfigMap whose value will become the value of the env variable APP
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: frontend-cm
+              key: ENVIRONMENT  # Key in the ConfigMap whose value becomes the value of ENVIRONMENT variable
+        volumeMounts:
+        - name: html-volume
+          mountPath: /usr/share/nginx/html  # Mount point inside the container (default HTML dir for NGINX)
+          readOnly: true  # Make the volume read-only
+      volumes:
+      - name: html-volume
+        configMap:
+          name: frontend-cm  # The ConfigMap being mounted as a volume
+          items:
+          - key: index.html  # The key in the ConfigMap to be used as a file
+            path: index.html  # The filename that will be created inside the mount path
+#+end_src
+
+When I only want the html item: use subPath to only get one of the item, even if this is already exits
+#+begin_src yaml
+   volumes:
+   - name: html-volume
+     configMap:
+       name: frontend-cm
+  ---
+  volumeMounts:
+  - name: html-volume
+    mountPath: /usr/share/nginx/html/index.html
+    subPath: index.html
+#+end_src
+
+*** secret
+Work the same as configMap
+
+*** environment value with configMap and secret
+- when configMap and Secret are mount as volumes, the update of value is valid in the container with volume, but the application should read them again.
+- But with subPath, the update will not work  
+*** usage
+#+begin_src yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: mypod
+  spec:
+    containers:
+      - name: mynginx
+        image: nginx
+        volumeMounts:
+            - name: my-vol1
+              path: /www/html/v1
+            - name: my-vol2
+              path: /www/html/v2
+
+    volumes:
+      - name: my-vol1
+        hostPath:
+          path: /my/loacl/path
+      - name: my-vol2
+        persistentVolumeClaim:
+          chainName: my-pvc
+    
+#+end_src
+
+** Matrics server
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+#+RESULTS:
+
+** selector
+#+begin_src yaml
+  selector:
+  matchLabels:
+    component: redis
+  matchExpressions:
+    - { key: tier, operator: In, values: [cache] }
+    - { key: environment, operator: NotIn, values: [dev] }
+#+end_src
+
+** nodeAffinity
+#+begin_src yaml
+  apiVersion: v1
+kind: Pod
+metadata:
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: topology.kubernetes.io/zone
+            operator: In
+            values:
+            - antarctica-east1
+            - antarctica-west1
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+          - key: another-node-label-key
+            operator: In
+            values:
+            - another-node-label-value
+#+end_src
+** networkPolicy
+select pod to action
+** update and rollback
+*** 1. create the deployment and  add description in metadata
+#+begin_src bash :exports both :results output
+  kubectl create deployment mynginx --image=nginx --replicas=2 
+#+end_src
+
+#+RESULTS:
+: deployment.apps/mynginx created
+
+add description
+#+begin_src bash :exports both :results output
+  kubectl annotate deployment mynginx description="my orginal nginx"
+#+end_src
+
+#+RESULTS:
+: deployment.apps/mynginx annotated
+
+#+begin_src bash :exports both :results output
+kubectl get deployment mynginx -o yaml | grep description
+#+end_src
+
+#+RESULTS:
+:     description: my orginal nginx
+
+this will not create a new revision fo rollback
+#+begin_src bash :exports both :results output
+  kubectl rollout history deployment mynginx 
+#+end_src
+
+#+RESULTS:
+: deployment.apps/mynginx 
+: REVISION  CHANGE-CAUSE
+: 1         <none>
+: 
+
+
+#+begin_src bash :exports both :results output
+  kubectl get pods
+#+end_src
+
+#+RESULTS:
+: NAME                       READY   STATUS    RESTARTS   AGE
+: mynginx-5cb564657c-h5pgb   1/1     Running   0          36s
+: mynginx-5cb564657c-jnmsk   1/1     Running   0          36s
+
+
+check the version
+#+begin_src bash :exports both :results output
+  kubectl exec  mynginx-5cb564657c-g6xjr  -- nginx -v 2>&1
+#+end_src
+
+#+RESULTS:
+: nginx version: nginx/1.29.3
+
+*** 2. make change
+#+begin_src bash :exports both :results output
+kubectl set image deployment mynginx  nginx=nginx:1.23 --record
+#+end_src
+
+#+RESULTS:
+: deployment.apps/mynginx image updated
+
+check if the change is finished
+#+begin_src bash :exports both :results output
+  kubectl rollout status deployment mynginx 
+#+end_src
+
+#+RESULTS:
+: deployment "mynginx" successfully rolled out
+
+
+if  it's done, check the revision records
+#+begin_src bash :exports both :results output
+  kubectl rollout history deployment mynginx 
+#+end_src
+
+#+RESULTS:
+: deployment.apps/mynginx 
+: REVISION  CHANGE-CAUSE
+: 1         <none>
+: 2         kubectl set image deployment mynginx nginx=nginx:1.23 --record=true
+: 
+
+
+#+begin_src bash :exports both :results output
+  kubectl get pods
+#+end_src
+
+#+RESULTS:
+: NAME                     READY   STATUS    RESTARTS   AGE
+: mynginx-7c9bbc59-7pkqd   1/1     Running   0          37s
+: mynginx-7c9bbc59-tjxv6   1/1     Running   0          39s
+
+check the change
+#+begin_src bash :exports both :results output
+  kubectl exec  mynginx-7c9bbc59-7pkqd  -- nginx -v 2>&1
+#+end_src
+
+#+RESULTS:
+: nginx version: nginx/1.23.4
+
+*** 3. rollback to wanted version and check again
+#+begin_src bash :exports both :results output
+  kubectl rollout undo deployment/mynginx  --to-revision=1
+#+end_src
+
+#+begin_src bash :exports both :results output
+  kubectl get pods
+#+end_src
+
+#+RESULTS:
+: NAME                       READY   STATUS    RESTARTS   AGE
+: mynginx-5cb564657c-2n8sx   1/1     Running   0          6s
+: mynginx-5cb564657c-46tzf   1/1     Running   0          9s
+
+
+and check again
+#+begin_src bash :exports both :results output
+  kubectl exec  mynginx-5cb564657c-2n8sx  -- nginx -v 2>&1
+#+end_src
+
+#+RESULTS:
+: nginx version: nginx/1.29.3
+
+*** 4. clean
+#+begin_src bash :exports both :results output
+  kubectl delete deployment mynginx
+#+end_src
+
+#+RESULTS:
+: deployment.apps "mynginx" deleted from default namespace
+
+** DaemonSets
+- a pod in a node mostly for functional support
+- such as kube-proxy
+
+* Kubectl imperative
+** Deployment
+Use --dry-run=client for local validation and --dry-run=server for API server validation
+#+begin_src bash :exports both :results output
+  kubectl create deployment backend-deploy \
+  --image=hashicorp/http-echo \
+  --replicas=3 \
+  --port=5678 \
+  --dry-run=client -o yaml 
+#+end_src
+
+#+RESULTS:
+#+begin_src yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: backend-deploy
+  name: backend-deploy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backend-deploy
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: backend-deploy
+    spec:
+      containers:
+      - image: hashicorp/http-echo
+        name: http-echo
+        ports:
+        - containerPort: 5678
+        resources: {}
+status: {}
+#+end_src
+
+#+begin_src 
+  kubectl expose deployment backend-deploy \
+  --type=ClusterIP \
+  --port=9090 \
+  --target-port=5678 \
+  --name=backend-svc \
+  --dry-run=client -o yaml 
+#+end_src
+
+No NodePort can be set here
+#+begin_src 
+  kubectl expose deployment backend-deploy \
+  --type=ClusterIP \
+  --port=9090 \
+  --target-port=5678 \
+  --name=backend-svc \
+  --dry-run=client -o yaml 
+#+end_src
+
+#+begin_src 
+kubectl run mypod.... --port=80, this port number is actually set the containerPort attribe
+kubectl expose pod  mypod.... --port=80, this port number is actually set the Port attribe, and the TargetPort is set to be same same of the containerPort of mypod, they have to be the same
+#+end_src
+
+#+begin_src bash :results output :exports both
+  kubectl create deployment nginx-deployment --image=nginx:1.14.2 --replicas=2 --port=80 --dry-run=client -o yaml 
+#+end_src
+
+#+RESULTS:
+#+begin_src yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: nginx-deployment
+  name: nginx-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx-deployment
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: nginx-deployment
+    spec:
+      containers:
+      - image: nginx:1.14.2
+        name: nginx
+        ports:
+        - containerPort: 80
+        resources: {}
+status: {}
+#+end_src
+* Examples 
+** Ingress
+
+#+begin_src yaml
+# ================================================
+# 1. Namespace
+# ================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-demo
+---
+# ================================================
+# 2. Service Account
+# ================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nginx-ingress-serviceaccount
+  namespace: ingress-demo
+---
+# ================================================
+# 3. ClusterRole (cluster-scoped)
+# ================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nginx-ingress-clusterrole
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "endpoints", "nodes", "pods", "secrets", "services"]
+    verbs: ["list", "watch", "get"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "ingressclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+# ================================================
+# 4. ClusterRoleBinding (binds SA to role)
+# ================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nginx-ingress-clusterrolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nginx-ingress-clusterrole
+subjects:
+  - kind: ServiceAccount
+    name: nginx-ingress-serviceaccount
+    namespace: ingress-demo
+---
+# ================================================
+# 5. ConfigMap
+# ================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-ingress-config
+  namespace: ingress-demo
+data:
+  proxy-body-size: "20m"
+  use-proxy-protocol: "false"
+---
+# ================================================
+# 6. Ingress Controller Deployment
+# ================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-ingress-controller
+  namespace: ingress-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-ingress
+  template:
+    metadata:
+      labels:
+        app: nginx-ingress
+    spec:
+      serviceAccountName: nginx-ingress-serviceaccount
+      containers:
+        - name: controller
+          image: registry.k8s.io/ingress-nginx/controller:v1.10.0
+          args:
+            - /nginx-ingress-controller
+            - --ingress-class=nginx
+            - --configmap=$(POD_NAMESPACE)/nginx-ingress-config
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: http
+              containerPort: 80
+            - name: https
+              containerPort: 443
+---
+# ================================================
+# 7. Ingress Controller Service
+# ================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-ingress-service
+  namespace: ingress-demo
+spec:
+  type: NodePort
+  selector:
+    app: nginx-ingress
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: 30080
+    - name: https
+      port: 443
+      targetPort: 443
+      nodePort: 30443
+---
+# ================================================
+# 8. Demo Web App ConfigMap
+# ================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webapp-html
+  namespace: ingress-demo
+data:
+  index.html: |
+    <html><body><h1>Hello from WebApp!</h1><p>Served through NGINX Ingress</p></body></html>
+---
+# ================================================
+# 9. Web App Deployment
+# ================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  namespace: ingress-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+      volumes:
+        - name: html
+          configMap:
+            name: webapp-html
+---
+# ================================================
+# 10. Web App Service
+# ================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp-service
+  namespace: ingress-demo
+spec:
+  selector:
+    app: webapp
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# ================================================
+# 11. Ingress Resource (TLS-enabled)
+# ================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: webapp-ingress
+  namespace: ingress-demo
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - webapp.local
+      secretName: webapp-tls-secret
+  rules:
+    - host: webapp.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: webapp-service
+                port:
+                  number: 80
+#+end_src
+
+** Milvus
+
+1. deploy the cluster
+   #+begin_src yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+  - role: worker
+  - role: worker
+  - role: worker  
+
+     
+   #+end_src
+
+2, update helm
+#+begin_src bash
+helm repo add milvus https://zilliztech.github.io/milvus-helm/
+helm repo update
+helm install my-milvus milvus/milvus \
+  --set cluster.enabled=true \
+  --set etcd.replicaCount=3 \
+  --set pulsar.enabled=false \
+  --set pulsarv3.enabled=false \
+  --set kafka.enabled=true \
+  --set kafka.replicaCount=3 \
+  --set minio.mode=distributed
+#+end_src

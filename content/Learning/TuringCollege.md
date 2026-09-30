@@ -1,5 +1,5 @@
 ---
-title: "AI Engineering: Consolidated Learning Notes"
+title: AI Engineering
 aliases:
   - Consolidated AI Learning
   - AI Learning Overview
